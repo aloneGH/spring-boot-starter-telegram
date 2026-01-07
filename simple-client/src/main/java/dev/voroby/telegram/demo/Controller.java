@@ -41,13 +41,17 @@ public class Controller {
     public record Query(String value){}
 
     @PostMapping(value = "/searchByPhone", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public Response<TdApi.User> searchUserByPhone(@RequestBody Query query) {
-        return userTemplate.searchUserByPhoneNumber(query.value).join();
+    public TdApi.User searchUserByPhone(@RequestBody Query query) {
+        return userTemplate.searchUserByPhoneNumber(query.value)
+                .thenApply(Response::getObjectOrThrow)
+                .join();
     }
 
     @PostMapping(value = "/searchByUsername", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public Response<TdApi.User> searchUserByUsername(@RequestBody Query query) {
-        return userTemplate.searchUserByUsername(query.value()).join();
+    public TdApi.User searchUserByUsername(@RequestBody Query query) {
+        return userTemplate.searchUserByUsername(query.value())
+                .thenApply(Response::getObjectOrThrow)
+                .join();
     }
 
     @GetMapping("/chatTitles")
@@ -107,7 +111,7 @@ public class Controller {
         var formattedText = new TdApi.FormattedText();
         formattedText.text = "Hello!";
         content.text = formattedText;
-        return new TdApi.SendMessage(chatId, 0, null, null, null, content);
+        return new TdApi.SendMessage(chatId, null, null, null, null, content);
     }
 
 }
