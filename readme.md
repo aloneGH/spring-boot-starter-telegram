@@ -13,15 +13,13 @@ Spring Boot Starter for [Telegram](https://telegram.org) based on [TDLib](https:
 - [Notice](#notice)
 - [License](#license)
 - [Other projects](#others)
-- [Acknowledgements](#acknowledgements)
 
 <a name="requirements"></a>
 ## Requirements
-| Technology  | Version |
-|-------------|---------|
-| jdk         | 17      |
-| TDLib       | 1.8.52  |
-| Spring Boot | 3.5.0   |
+
+- jdk         17    
+- TDLib       1.8.60
+- Spring Boot 4.0.1 
 
 TDLib [depends](https://github.com/tdlib/td#dependencies) on:
 
@@ -101,14 +99,14 @@ repositories {
 <dependency>
     <groupId>dev.voroby</groupId>
     <artifactId>spring-boot-starter-telegram</artifactId>
-    <version>1.18.0</version>
+    <version>1.19.0</version>
 </dependency>
 
 <!-- Kotlin -->
 <dependency>
     <groupId>dev.voroby</groupId>
     <artifactId>spring-boot-starter-telegram-kt</artifactId>
-    <version>1.18.0</version>
+    <version>1.19.0</version>
 </dependency>
 ```
 
@@ -116,21 +114,21 @@ repositories {
 
 ```kotlin
 // Java
-implementation("dev.voroby:spring-boot-starter-telegram:1.18.0")
+implementation("dev.voroby:spring-boot-starter-telegram:1.19.0")
 
 // Kotlin
-implementation("dev.voroby:spring-boot-starter-telegram-kt:1.18.0")
+implementation("dev.voroby:spring-boot-starter-telegram-kt:1.19.0")
 ```
 
-Or just download artifact by path `Releases -> 1.18.0 -> dev.voroby.spring-boot-starter-telegram (maven) -> Assets -> spring-boot-starter-telegram-1.18.0.jar` 
+Or just download artifact by path `Releases -> 1.19.0 -> dev.voroby.spring-boot-starter-telegram (maven) -> Assets -> spring-boot-starter-telegram-1.19.0.jar` 
 from the latest release and add it to your project's classpath instead of the steps above.
 
-4) Specify JVM property for compiled TDLib shared library path:
+4) Build `TDLib` native library for you operating system following these [instructions](https://github.com/p-vorobyev/spring-boot-starter-telegram/blob/master/libs/build/readme.md). 
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Specify JVM property for compiled TDLib shared library path:
 ```shell
 -Djava.library.path=<path_to_shared_library>
 ```
-You can find compiled libraries for several platforms in the `libs.zip` archive from the latest [release](https://github.com/p-vorobyev/spring-boot-starter-telegram/releases/tag/1.18.0).
-If you haven't found a library for your OS and architecture, you can build it yourself following these [instructions](https://github.com/p-vorobyev/spring-boot-starter-telegram/blob/master/libs/build/readme.md).
 
 5) If you are using IntelliJ IDEA, set the property `idea.max.intellisense.filesize` for comfortable work with `TdApi` 
 objects. Go to `Help -> Edit Custom Properties...` and add `idea.max.intellisense.filesize=5000`, then restart the IDE. 
@@ -403,9 +401,3 @@ Be careful and do not push personal data like `api-id`,`api-hash`, `phone` to re
 ## Other projects
 - [Telegram Desktop](https://github.com/p-vorobyev/telegram-desktop-compose-multiplatform)
 - [Telegram Gateway SDK](https://github.com/p-vorobyev/telegram-gateway-sdk)
-
-<a name="acknowledgements"></a>
-## Acknowledgements
-Thanks for the best IDE [support](https://jb.gg/OpenSourceSupport).
-
-<img alt="jb_beam" src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" width="400"/>
