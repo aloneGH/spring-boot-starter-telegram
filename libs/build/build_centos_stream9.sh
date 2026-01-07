@@ -5,11 +5,13 @@ echo "Starting build process..."
 rm -rf td
 git clone https://github.com/tdlib/td.git
 cd td
-git checkout 5c77c4692c28eb48a68ef1c1eeb1b1d732d507d3
+git checkout 0da5c72f8365fb4857096e716d53175ddbdf5a15
 rm -rf build
 mkdir build
 cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=../example/java/td -DTD_ENABLE_JNI=ON ..
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX:PATH=../example/java/td \
+      -DTD_ENABLE_JNI=ON ..
 echo "Building and installing core TDLib..."
 cmake --build . --target install
 cd ..
@@ -17,24 +19,29 @@ cd example/java
 rm -rf build
 mkdir build
 cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=../../../tdlib -DTd_DIR:PATH=$(readlink -e ../td/lib/cmake/Td) ..
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX:PATH=../../../tdlib \
+      -DTd_DIR:PATH=$(readlink -e ../td/lib/cmake/Td) ..
 echo "Building and installing Java JNI library..."
 cmake --build . --target install
 cd ../../..
 
-if [ $(uname -a | grep -c 'aarch64') -eq 1 ]; then
-  echo "Detected ARM64 architecture."
-  rm ../../centos_stream9_arm64/libtdjni.so
-  cp tdlib/bin/libtdjni.so ../../centos_stream9_arm64
-  echo "Library saved to project directory: libs/centos_stream9_arm64"
-else
-  echo "Detected x64 architecture."
-  rm ../../centos_stream9_x64/libtdjni.so
-  cp tdlib/bin/libtdjni.so ../../centos_stream9_x64
-  echo "Library saved to project directory: libs/centos_stream9_x64"
-fi
+# Determine architecture
+case $(uname -m) in
+  aarch64)
+    DEST_DIR="../../centos_stream9_arm64"
+    ;;
+  x86_64)
+    DEST_DIR="../../centos_stream9_x64"
+    ;;
+  *)
+    echo "Unsupported architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
 
-echo "Cleaning up temporary files..."
-cd ..
+cp tdlib/bin/libtdjni.so $DEST_DIR
+echo "Library saved to project directory: $DEST_DIR"
+# Cleanup on exit
 rm -rf td
 echo "Build process completed successfully!"

@@ -11,7 +11,7 @@ echo "Starting build process..."
 rm -rf td
 git clone https://github.com/tdlib/td.git
 cd td
-git checkout 5c77c4692c28eb48a68ef1c1eeb1b1d732d507d3
+git checkout 0da5c72f8365fb4857096e716d53175ddbdf5a15
 git clone https://github.com/Microsoft/vcpkg.git
 cd vcpkg
 git checkout bc3512a509f9d29b37346a7e7e929f9a26e66c7e
@@ -21,7 +21,9 @@ cd ..
 rm -rf build
 mkdir build
 cd build
-cmake -A x64 -DCMAKE_INSTALL_PREFIX:PATH=../example/java/td -DTD_ENABLE_JNI=ON -DCMAKE_TOOLCHAIN_FILE:FILEPATH=../vcpkg/scripts/buildsystems/vcpkg.cmake ..
+cmake -A x64 -DCMAKE_INSTALL_PREFIX:PATH=../example/java/td \
+      -DTD_ENABLE_JNI=ON \
+      -DCMAKE_TOOLCHAIN_FILE:FILEPATH=../vcpkg/scripts/buildsystems/vcpkg.cmake ..
 echo "Building and installing core TDLib..."
 cmake --build . --target install --config Release
 cd ..
@@ -29,7 +31,9 @@ cd example/java
 rm -rf build
 mkdir build
 cd build
-cmake -A x64 -DCMAKE_INSTALL_PREFIX:PATH=../../../tdlib -DCMAKE_TOOLCHAIN_FILE:FILEPATH=../../../vcpkg/scripts/buildsystems/vcpkg.cmake -DTd_DIR:PATH=$(readlink -e ../td/lib/cmake/Td) ..
+cmake -A x64 -DCMAKE_INSTALL_PREFIX:PATH=../../../tdlib \
+      -DCMAKE_TOOLCHAIN_FILE:FILEPATH=../../../vcpkg/scripts/buildsystems/vcpkg.cmake \
+      -DTd_DIR:PATH=$(readlink -e ../td/lib/cmake/Td) ..
 echo "Building and installing Java JNI library..."
 cmake --build . --target install --config Release
 cd ../../..
