@@ -22,7 +22,8 @@ public class Scheduler {
             if (message == null) {
                 break;
             }
-            printService.print(message);
+            // TODO
+//            printService.print(message);
         }
     }
 }

@@ -3,13 +3,10 @@ package dev.voroby.telegram.demo;
 import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.UserTemplate;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
+import dev.voroby.telegram.music.service.MusicCollectService;
 import org.drinkless.tdlib.TdApi;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
 import java.util.List;
@@ -26,10 +23,13 @@ public class Controller {
 
     private final UserTemplate userTemplate;
 
+    private final MusicCollectService musicCollectService;
+
     public Controller(TelegramClient telegramClient,
-                      UserTemplate userTemplate) {
+                      UserTemplate userTemplate, MusicCollectService musicCollectService) {
         this.telegramClient = telegramClient;
         this.userTemplate = userTemplate;
+        this.musicCollectService = musicCollectService;
     }
 
     @GetMapping("/getMe")
@@ -38,7 +38,8 @@ public class Controller {
         return userResponse.getObjectOrThrow();
     }
 
-    public record Query(String value){}
+    public record Query(String value) {
+    }
 
     @PostMapping(value = "/searchByPhone", consumes = MediaType.APPLICATION_JSON_VALUE)
     public TdApi.User searchUserByPhone(@RequestBody Query query) {
@@ -56,7 +57,7 @@ public class Controller {
 
     @GetMapping("/chatTitles")
     public List<String> getMyChats() {
-        Response<TdApi.Chats> chatsResponse = telegramClient.send(new TdApi.GetChats(new TdApi.ChatListMain(), 100));
+        Response<TdApi.Chats> chatsResponse = telegramClient.send(new TdApi.GetChats(new TdApi.ChatListMain(), 1000));
         TdApi.Chats chats = chatsResponse.getObjectOrThrow();
         return Arrays.stream(chats.chatIds)
                 .mapToObj(chatId -> {
@@ -66,7 +67,13 @@ public class Controller {
                 }).toList();
     }
 
-    record Result<T>(Optional<T> object, Optional<TdApi.Error> error) {}
+    @GetMapping("/chatFolders")
+    public List<TdApi.Chat> getMyChatFolders() {
+        return musicCollectService.queryChats("Music");
+    }
+
+    record Result<T>(Optional<T> object, Optional<TdApi.Error> error) {
+    }
 
     @GetMapping("/sendHello")
     public void helloToYourself() {
