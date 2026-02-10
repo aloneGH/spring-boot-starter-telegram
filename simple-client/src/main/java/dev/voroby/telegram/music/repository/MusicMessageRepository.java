@@ -1,0 +1,17 @@
+package dev.voroby.telegram.music.repository;
+
+import dev.voroby.telegram.music.model.MusicMessage;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface MusicMessageRepository extends JpaRepository<MusicMessage, Long> {
+
+    boolean existsByChatIdAndMessageId(Long chatId, Long messageId);
+
+    /**
+     * 查询某个频道本地已保存的最新一条消息（按 messageId 倒序）。
+     */
+    MusicMessage findTopByChatIdOrderByMessageIdDesc(Long chatId);
+}
+

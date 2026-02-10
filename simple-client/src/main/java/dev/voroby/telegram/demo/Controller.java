@@ -3,7 +3,8 @@ package dev.voroby.telegram.demo;
 import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.UserTemplate;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
-import dev.voroby.telegram.music.service.MusicCollectService;
+import dev.voroby.telegram.music.model.MusicMessage;
+import dev.voroby.telegram.music.repository.MusicMessageRepository;
 import org.drinkless.tdlib.TdApi;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import static java.util.Optional.empty;
 
@@ -23,13 +25,12 @@ public class Controller {
 
     private final UserTemplate userTemplate;
 
-    private final MusicCollectService musicCollectService;
+    private final MusicMessageRepository repo;
 
-    public Controller(TelegramClient telegramClient,
-                      UserTemplate userTemplate, MusicCollectService musicCollectService) {
+    public Controller(TelegramClient telegramClient, UserTemplate userTemplate, MusicMessageRepository repo) {
         this.telegramClient = telegramClient;
         this.userTemplate = userTemplate;
-        this.musicCollectService = musicCollectService;
+        this.repo = repo;
     }
 
     @GetMapping("/getMe")
@@ -67,11 +68,6 @@ public class Controller {
                 }).toList();
     }
 
-    @GetMapping("/chatFolders")
-    public List<TdApi.Chat> getMyChatFolders() {
-        return musicCollectService.queryChats("Music");
-    }
-
     record Result<T>(Optional<T> object, Optional<TdApi.Error> error) {
     }
 
@@ -82,6 +78,11 @@ public class Controller {
                 .thenApply(this::searchChatByUsername)
                 .thenCompose(chatsFuture -> chatsFuture.thenApply(this::getMyChatId))
                 .thenAccept(this::sendHelloIfFound);
+    }
+
+    @GetMapping("/all")
+    public List<MusicMessage> all() {
+        return repo.findAll().stream().limit(10).collect(Collectors.toList());
     }
 
     private Result<String> getActiveUsername(Response<TdApi.User> userResponse) {

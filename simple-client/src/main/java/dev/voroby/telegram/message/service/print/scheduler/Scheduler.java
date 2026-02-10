@@ -1,9 +1,8 @@
 package dev.voroby.telegram.message.service.print.scheduler;
 
-import dev.voroby.telegram.message.common.Cache;
+import dev.voroby.telegram.message.common.MessageCache;
 import dev.voroby.telegram.message.service.print.PrintService;
 import org.drinkless.tdlib.TdApi;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -15,10 +14,10 @@ public class Scheduler {
         this.printService = printService;
     }
 
-    @Scheduled(fixedDelay = 1000)
+    //    @Scheduled(fixedDelay = 1000)
     private void launch() {
         for (int i = 0; i < 100; i++) {
-            TdApi.Message message = Cache.newMessagesQueue.pollFirst();
+            TdApi.Message message = MessageCache.newMessagesQueue.pollFirst();
             if (message == null) {
                 break;
             }
