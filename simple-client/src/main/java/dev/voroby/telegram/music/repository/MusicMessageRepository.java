@@ -21,5 +21,7 @@ public interface MusicMessageRepository extends JpaRepository<MusicMessage, Long
     List<MusicMessage> findByChatId(Long chatId);
 
     List<MusicMessage> findByMessageId(Long messageId);
+
+    List<MusicMessage> findByChatIdAndMessageId(Long chatId, Long messageId);
 }
 

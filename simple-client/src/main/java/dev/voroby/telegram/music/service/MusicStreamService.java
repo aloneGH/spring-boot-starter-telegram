@@ -13,9 +13,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.util.UriUtils;
 
 import java.io.File;
 import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController("musicStreamService")
@@ -83,6 +85,7 @@ public class MusicStreamService {
     public ResponseEntity<StreamingResponseBody> streamMusic(
             @RequestHeader(value = "Range", required = false) String range,
             @PathVariable long msgId,
+            @RequestParam(name = "fid") long chatId,
             @RequestParam(name = "size", defaultValue = "-1") long size) {
 
         long start = 0;
@@ -92,14 +95,14 @@ public class MusicStreamService {
         }
         final long finalStart = start;
 
-        List<MusicMessage> result = musicMessageRepository.findByMessageId(msgId);
+        List<MusicMessage> result = musicMessageRepository.findByChatIdAndMessageId(chatId, msgId);
         MusicMessage musicMessage = result == null || result.isEmpty() ? null : result.get(0);
         if (musicMessage == null) {
             log.warn("no music message found for {}", msgId);
             return ResponseEntity.notFound().build();
         }
 
-        TdApi.File tdFile = downloadFile(musicMessage.getChatId(), musicMessage.getMessageId());
+        TdApi.File tdFile = downloadFile(chatId, msgId);
         if (tdFile == null) {
             return ResponseEntity.notFound().build();
         }
@@ -116,7 +119,9 @@ public class MusicStreamService {
             return ResponseEntity.badRequest().build();
         }
 
+        String encodedFileName = UriUtils.encode(musicMessage.getFileName(), StandardCharsets.UTF_8.toString());
         return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + encodedFileName + "\"; filename*=UTF-8''" + encodedFileName)
                 .header(HttpHeaders.CONTENT_TYPE, musicMessage.getMimeType()) // 明确指定视频格式
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(reqSize))
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
