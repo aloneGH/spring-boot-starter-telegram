@@ -9,8 +9,11 @@ import java.time.Instant;
  * 通过 (title, performer) 保证去重。
  */
 @Entity
-@Table(name = "music_message",
-        uniqueConstraints = @UniqueConstraint(name = "uk_title_performer", columnNames = {"title", "performer"}))
+@Table(name = "music_message", indexes = {
+        @Index(name = "idx_file_id", columnList = "audio_file_id")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uk_title_performer", columnNames = {"title", "performer"})
+})
 public class MusicMessage {
 
     @Id

@@ -47,6 +47,27 @@ public class MusicSyncService {
         this.musicMessageRepository = musicMessageRepository;
     }
 
+    @Async
+    @EventListener(ApplicationReadyEvent.class)
+    public void init() {
+        log.info("Starting Music Sync Service");
+        TdApi.OptimizeStorage optimizeRequest = new TdApi.OptimizeStorage(
+                2L * 1024 * 1024 * 1024, // 2GB
+                7 * 24 * 60 * 60,         // 7 天 (秒)
+                1000,                     // 最多保留 1000 个文件
+                60 * 60,              // 刚下载 1 小时内的文件不参与自动清理
+                null,
+                null,
+                null,
+                false,
+                0
+        );
+        telegramClient.sendWithCallback(optimizeRequest, (obj, error) -> {
+            // 打印当前总字节数
+            System.out.println("当前 TDLib 占用空间: " + obj.size / (1024 * 1024) + " MB");
+        });
+    }
+
     /**
      * 应用启动完成后做一次历史消息同步。
      */
