@@ -1,9 +1,12 @@
 package dev.voroby.telegram.music.repository;
 
 import dev.voroby.telegram.music.model.MusicMessage;
+import jakarta.transaction.Transactional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -23,5 +26,11 @@ public interface MusicMessageRepository extends JpaRepository<MusicMessage, Long
     List<MusicMessage> findByMessageId(Long messageId);
 
     List<MusicMessage> findByChatIdAndMessageId(Long chatId, Long messageId);
+
+    void deleteByChatIdIn(java.util.Collection<Long> chatIds);
+
+    @Modifying
+    @Transactional
+    void deleteByChatIdNotIn(Collection<Long> chatIds);
 }
 

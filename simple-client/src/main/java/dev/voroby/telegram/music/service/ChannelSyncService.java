@@ -4,6 +4,7 @@ import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.telegram.music.cache.ChatFolderCache;
 import dev.voroby.telegram.music.model.ChannelInfo;
 import dev.voroby.telegram.music.repository.ChannelInfoRepository;
+import dev.voroby.telegram.music.repository.MusicMessageRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.drinkless.tdlib.TdApi;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,7 @@ public class ChannelSyncService {
 
     private final TelegramClient telegramClient;
     private final ChannelInfoRepository channelInfoRepository;
+    private final MusicMessageRepository musicMessageRepository;
     private final MusicSyncService musicSyncService;
 
     /**
@@ -39,9 +41,11 @@ public class ChannelSyncService {
     private String folderName;
 
     public ChannelSyncService(TelegramClient telegramClient,
-                              ChannelInfoRepository channelInfoRepository, MusicSyncService musicSyncService) {
+                              ChannelInfoRepository channelInfoRepository, MusicMessageRepository musicMessageRepository,
+                              MusicSyncService musicSyncService) {
         this.telegramClient = telegramClient;
         this.channelInfoRepository = channelInfoRepository;
+        this.musicMessageRepository = musicMessageRepository;
         this.musicSyncService = musicSyncService;
     }
 
@@ -94,6 +98,13 @@ public class ChannelSyncService {
             channelInfoRepository.deleteByFolderNameAndChatIdNotIn(folderName, currentChatIds);
         } catch (Exception e) {
             log.error("删除本地已不存在的频道记录失败, folderName={}, remainIds={}", folderName, currentChatIds, e);
+        }
+
+        // 删除本地中已经不存在的消息
+        try {
+            musicMessageRepository.deleteByChatIdNotIn(currentChatIds);
+        } catch (Exception e) {
+            log.error("删除本地中已经不存在的消息失败, remainIds={}", currentChatIds, e);
         }
     }
 
