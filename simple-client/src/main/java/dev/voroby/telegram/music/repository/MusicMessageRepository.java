@@ -32,5 +32,7 @@ public interface MusicMessageRepository extends JpaRepository<MusicMessage, Long
     @Modifying
     @Transactional
     void deleteByChatIdNotIn(Collection<Long> chatIds);
+
+    List<MusicMessage> findAllByChatId(Long chatId);
 }
 

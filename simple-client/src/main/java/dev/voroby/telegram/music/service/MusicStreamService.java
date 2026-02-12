@@ -2,7 +2,10 @@ package dev.voroby.telegram.music.service;
 
 import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
+import dev.voroby.telegram.music.dto.FolderItem;
+import dev.voroby.telegram.music.dto.MusicItem;
 import dev.voroby.telegram.music.model.MusicMessage;
+import dev.voroby.telegram.music.repository.ChannelInfoRepository;
 import dev.voroby.telegram.music.repository.MusicMessageRepository;
 import jakarta.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +22,7 @@ import java.io.File;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController("musicStreamService")
 @Slf4j
@@ -28,9 +32,28 @@ public class MusicStreamService {
 
     private final MusicMessageRepository musicMessageRepository;
 
-    public MusicStreamService(TelegramClient telegramClient, MusicMessageRepository musicMessageRepository) {
+    private final ChannelInfoRepository channelInfoRepository;
+
+    public MusicStreamService(TelegramClient telegramClient, MusicMessageRepository musicMessageRepository,
+                              ChannelInfoRepository channelInfoRepository) {
         this.telegramClient = telegramClient;
         this.musicMessageRepository = musicMessageRepository;
+        this.channelInfoRepository = channelInfoRepository;
+    }
+
+    @GetMapping("/folders")
+    public List<FolderItem> folders() {
+        return channelInfoRepository.findAll().stream()
+                .map(it -> new FolderItem(it.getChatId(), it.getTitle()))
+                .collect(Collectors.toList());
+    }
+
+    @GetMapping("/folder/{fid}")
+    public List<MusicItem> musicList(@PathVariable(name = "fid") long chatId) {
+        return musicMessageRepository.findAllByChatId(chatId).stream()
+                .map(it -> new MusicItem(it.getChatId(), it.getMessageId(), it.getFileName(),
+                        it.getMimeType(), it.getTitle(), it.getPerformer(), it.getDurationSeconds(), it.getAudioFileSize())
+                ).collect(Collectors.toList());
     }
 
     @Nullable
@@ -83,7 +106,7 @@ public class MusicStreamService {
 
     @GetMapping("/stream/{msgId}")
     public ResponseEntity<StreamingResponseBody> streamMusic(
-            @RequestHeader(value = "Range", required = false) String range,
+            @RequestHeader(name = "Range", required = false) String range,
             @PathVariable long msgId,
             @RequestParam(name = "fid") long chatId,
             @RequestParam(name = "size", defaultValue = "-1") long size) {
