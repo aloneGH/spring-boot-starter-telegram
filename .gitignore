@@ -8,5 +8,12 @@ database
 *.dylib
 *.dll
 .DS_Store
-libs
+libs/build
+libs/td
+libs/centos*
+libs/debian*
+libs/macos*
+libs/ubuntu*
+libs/windows*
 files
+logs
