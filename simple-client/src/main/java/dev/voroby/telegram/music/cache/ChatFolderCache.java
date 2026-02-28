@@ -2,6 +2,7 @@ package dev.voroby.telegram.music.cache;
 
 import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
+import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import org.drinkless.tdlib.TdApi;
 import org.jspecify.annotations.NonNull;
@@ -18,16 +19,7 @@ public final class ChatFolderCache {
     @Nullable
     public static List<TdApi.Chat> queryChats(@NonNull Logger log, @NonNull TelegramClient telegramClient,
                                               @NonNull String folderName) {
-        TdApi.ChatFolderInfo folderInfo = ChatFolderCache.chatFolders.stream()
-                .filter(it -> folderName.equals(it.name.text.text))
-                .findFirst().orElse(null);
-        if (folderInfo == null) {
-            log.warn("No folder info with name {} found", folderName);
-            return null;
-        }
-
-        Response<TdApi.ChatFolder> rspChatFolder = telegramClient.send(new TdApi.GetChatFolder(folderInfo.id));
-        TdApi.ChatFolder chatFolder = rspChatFolder.getObject().orElse(null);
+        TdApi.ChatFolder chatFolder = queryChatFolder(telegramClient, folderName);
         if (chatFolder == null) {
             log.warn("No folder with name {} found", folderName);
             return null;
@@ -45,5 +37,24 @@ public final class ChatFolderCache {
         }
 
         return chats;
+    }
+
+    @Nullable
+    public static TdApi.ChatFolderInfo queryChatFolderInfo(@Nonnull String folderName) {
+        return chatFolders.stream()
+                .filter(it -> folderName.equals(it.name.text.text))
+                .findFirst().orElse(null);
+    }
+
+    @Nullable
+    public static TdApi.ChatFolder queryChatFolder(@NonNull TelegramClient telegramClient, @Nonnull String folderName) {
+        TdApi.ChatFolderInfo folderInfo = queryChatFolderInfo(folderName);
+
+        if (folderInfo == null) {
+            return null;
+        }
+
+        Response<TdApi.ChatFolder> response = telegramClient.send(new TdApi.GetChatFolder(folderInfo.id));
+        return response.getObject().orElse(null);
     }
 }

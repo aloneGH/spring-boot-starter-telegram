@@ -2,6 +2,8 @@ package dev.voroby.telegram.music.repository;
 
 import dev.voroby.telegram.music.model.MusicMessage;
 import jakarta.transaction.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Repository;
@@ -34,5 +36,7 @@ public interface MusicMessageRepository extends JpaRepository<MusicMessage, Long
     void deleteByChatIdNotIn(Collection<Long> chatIds);
 
     List<MusicMessage> findAllByChatId(Long chatId);
+
+    Page<MusicMessage> findByChatId(Long chatId, Pageable pageable);
 }
 

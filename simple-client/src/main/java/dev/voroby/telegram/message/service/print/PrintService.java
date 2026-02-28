@@ -1,12 +1,14 @@
 package dev.voroby.telegram.message.service.print;
 
 import dev.voroby.telegram.chat.common.Cache;
-import lombok.extern.slf4j.Slf4j;
 import org.drinkless.tdlib.TdApi;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-@Service @Slf4j
+@Service
 public class PrintService {
+    private static final Logger log = LoggerFactory.getLogger(PrintService.class);
 
     public void print(TdApi.Message message) {
         TdApi.MessageContent content = message.content;

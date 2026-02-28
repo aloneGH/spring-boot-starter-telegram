@@ -5,19 +5,32 @@ import dev.voroby.springframework.telegram.client.templates.response.Response;
 import dev.voroby.telegram.message.common.MessageCache;
 import dev.voroby.telegram.music.cache.ChatFolderCache;
 import dev.voroby.telegram.music.model.MusicMessage;
+import dev.voroby.telegram.music.model.SyncMusicMessage;
 import dev.voroby.telegram.music.repository.MusicMessageRepository;
-import lombok.extern.slf4j.Slf4j;
+import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
 import org.drinkless.tdlib.TdApi;
+import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 将指定文件夹中的频道消息（主要是歌曲文件）同步到本地 SQLite。
@@ -27,13 +40,16 @@ import java.util.List;
  * - 通过 (chatId, messageId) 唯一约束保证本地数据无重复。
  */
 @Service
-@Slf4j
 public class MusicSyncService {
+    private static final Logger log = LoggerFactory.getLogger(MusicSyncService.class);
 
     private static final int HISTORY_PAGE_LIMIT = 100;
 
     private final TelegramClient telegramClient;
     private final MusicMessageRepository musicMessageRepository;
+    private final SyncMusicMessageRepository syncMusicMessageRepository;
+
+    public static final Map<Integer, CompletableFuture<TdApi.File>> downloadFutures = new ConcurrentHashMap<>();
 
     /**
      * 需要同步的聊天文件夹名称（人工筛选好的“音乐频道文件夹”）
@@ -41,10 +57,15 @@ public class MusicSyncService {
     @Value("${music.sync.folder-name:Music}")
     private String folderName;
 
+    @Value("${music.sync.MusicSource:Music-Source}")
+    private String musicSourceFolderName;
+
     public MusicSyncService(TelegramClient telegramClient,
-                            MusicMessageRepository musicMessageRepository) {
+                            MusicMessageRepository musicMessageRepository,
+                            SyncMusicMessageRepository syncMusicMessageRepository) {
         this.telegramClient = telegramClient;
         this.musicMessageRepository = musicMessageRepository;
+        this.syncMusicMessageRepository = syncMusicMessageRepository;
     }
 
     @Async
@@ -154,14 +175,14 @@ public class MusicSyncService {
      * 定时消费实时新消息队列并写入 SQLite。
      * 与 message.service.print.scheduler.Scheduler 的机制类似。
      */
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelay = 60_000)
     public void syncRealtimeMessages() {
         // 如果文件夹信息还没准备好，直接跳过
         if (ChatFolderCache.chatFolders.isEmpty()) {
             return;
         }
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 6000; i++) {
             TdApi.Message message = MessageCache.newMessagesQueue.pollFirst();
             if (message == null) {
                 break;
@@ -293,6 +314,241 @@ public class MusicSyncService {
                 audioFileId,
                 audioFileSize
         );
+    }
+
+    @Nullable
+    public TdApi.File queryFile(int fileId) {
+        log.info("queryFile: {}", fileId);
+        Response<TdApi.File> response = telegramClient.send(new TdApi.GetFile(fileId));
+        TdApi.Error error = response.getError().orElse(null);
+        if (error != null) {
+            log.error("queryFile error: {}", error);
+            return null;
+        }
+
+        TdApi.File file = response.getObject().orElse(null);
+        if (file == null) {
+            log.error("queryFile file is null: {}", fileId);
+            return null;
+        }
+
+        log.info("queryFile: {} -> {}, size = {}", fileId, file.local.path, file.expectedSize);
+        return file;
+    }
+
+    @Nullable
+    public TdApi.Message queryMessage(long chatId, long messageId) {
+        Response<TdApi.Message> response = telegramClient.send(new TdApi.GetMessage(chatId, messageId));
+        TdApi.Error error = response.getError().orElse(null);
+        if (error != null) {
+            log.error("queryMessage: failed to find msg, {} -> {}", messageId, error);
+            return null;
+        }
+
+        return response.getObject().orElse(null);
+    }
+
+    @Nullable
+    public TdApi.File downloadFile(long chatId, long messageId) {
+        log.info("downloadFile: {}", messageId);
+        TdApi.Message message = queryMessage(chatId, messageId);
+        if (message == null) {
+            log.error("downloadFile: failed to find msg -> {}", messageId);
+            return null;
+        }
+
+        TdApi.MessageContent content = message.content;
+        int fileId = 0;
+        if (content instanceof TdApi.MessageAudio ma && ma.audio != null) {
+            TdApi.Audio audio = ma.audio;
+            fileId = audio.audio.id;
+        } else if (content instanceof TdApi.MessageDocument md && md.document != null) {
+            fileId = md.document.document.id;
+        }
+        if (fileId == 0) {
+            log.error("downloadFile: failed to find fileId -> {}", messageId);
+            return null;
+        }
+
+        TdApi.File file = queryFile(fileId);
+        if (file == null) {
+            log.error("downloadFile: failed, file is null");
+            return null;
+        }
+
+        String path = file.local.path;
+        log.info("local path {}", path);
+        if (file.local.isDownloadingCompleted) {
+            log.info("file is downloaded");
+            return file;
+        }
+
+        if (!file.local.canBeDownloaded) {
+            log.info("local can't be downloaded");
+            return null;
+        }
+
+        log.info("request to download");
+        Response<TdApi.File> fileResponse = telegramClient.send(new TdApi.DownloadFile(fileId, 1, 0, 0, false));
+        TdApi.Error error = fileResponse.getError().orElse(null);
+        if (error != null) {
+            log.error("downloadFile error: {}", error);
+            return null;
+        }
+
+        file = fileResponse.getObject().orElse(file);
+        return file;
+    }
+
+    public void syncMusicMessages(int count) {
+        log.info("syncMusicMessages count={}", count);
+        List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
+        if (chats == null || chats.isEmpty()) {
+            log.error("syncMusicMessages chats is null or empty");
+            return;
+        }
+
+        List<MusicMessage> unsyncMusicMessage = new ArrayList<>();
+        for (TdApi.Chat chat : chats) {
+            long chatId = chat.id;
+            List<MusicMessage> musicMessages = findUnsyncMusicMessage(chatId, count);
+            unsyncMusicMessage.addAll(musicMessages);
+            if (unsyncMusicMessage.size() >= count) {
+                break;
+            }
+        }
+
+        if (unsyncMusicMessage.isEmpty()) {
+            log.warn("syncMusicMessages is empty");
+            return;
+        }
+
+        List<SyncMusicMessage> toSave = Collections.synchronizedList(new ArrayList<>());
+        List<Integer> downloadFileIds = new ArrayList<>();
+        List<CompletableFuture<?>> allChains = new ArrayList<>();
+
+        for (MusicMessage musicMessage : unsyncMusicMessage) {
+            long originChatId = musicMessage.getChatId();
+            long messageId = musicMessage.getMessageId();
+
+            TdApi.File tdFile = downloadFile(originChatId, messageId);
+            if (tdFile == null) {
+                log.error("downloadFile: failed to download file -> {} -> {}", originChatId, messageId);
+                continue;
+            }
+
+            CompletableFuture<TdApi.File> future = new CompletableFuture<>();
+            downloadFutures.put(tdFile.id, future);
+            downloadFileIds.add(tdFile.id);
+
+            TdApi.Chat newChat = queryNewChat(telegramClient, originChatId);
+            if (newChat == null) {
+                future.completeExceptionally(new RuntimeException("failed to query new chat " + originChatId));
+                continue;
+            }
+
+            CompletableFuture<Void> wholeChain = future.thenCompose(file -> sendAudioMessage(newChat.id, file, musicMessage))
+                    .thenAccept(message -> {
+                        SyncMusicMessage syncMusicMessage = new SyncMusicMessage(message.chatId, originChatId, message.id,
+                                musicMessage.getMessageId(), Instant.ofEpochSecond(message.date),
+                                musicMessage.getFileName(), musicMessage.getMimeType(), musicMessage.getTitle(),
+                                musicMessage.getPerformer(), musicMessage.getDurationSeconds(),
+                                musicMessage.getCoverFileId(), musicMessage.getCoverWidth(), musicMessage.getCoverHeight(),
+                                musicMessage.getAudioFileSize());
+                        toSave.add(syncMusicMessage);
+                    }).exceptionally(ex -> {
+                        log.error("syncMusicMessages error: {}", ex.getMessage());
+                        return null;
+                    });
+            allChains.add(wholeChain);
+
+            if (tdFile.local.isDownloadingCompleted) {
+                future.complete(tdFile);
+            }
+        }
+
+        try {
+            CompletableFuture.allOf(allChains.toArray(CompletableFuture[]::new))
+                    .get(30L * count, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.error("syncMusicMessages: timeout", e);
+        } finally {
+            for (Integer downloadFileId : downloadFileIds) {
+                downloadFutures.remove(downloadFileId);
+            }
+
+            syncMusicMessageRepository.saveAll(toSave);
+        }
+    }
+
+    @Nonnull
+    public CompletableFuture<TdApi.Message> sendAudioMessage(long chatId, @Nonnull TdApi.File file,
+                                                             @Nonnull MusicMessage musicMessage) {
+        CompletableFuture<TdApi.Message> future = new CompletableFuture<>();
+
+        TdApi.InputFileLocal inputFile = new TdApi.InputFileLocal(file.local.path);
+        TdApi.InputMessageAudio content = new TdApi.InputMessageAudio(inputFile, null,
+                musicMessage.getDurationSeconds(), musicMessage.getTitle(), musicMessage.getPerformer(), null);
+
+        telegramClient.sendWithCallback(new TdApi.SendMessage(chatId, null, null, null, null, content),
+                (obj, error) -> {
+                    if (error == null) {
+                        future.complete(obj);
+                    } else {
+                        future.completeExceptionally(new RuntimeException("sendAudioMessage: failed -> " + error));
+                    }
+                });
+
+        return future;
+    }
+
+    @Nonnull
+    private List<MusicMessage> findUnsyncMusicMessage(long chatId, int count) {
+        List<MusicMessage> results = new ArrayList<>();
+        int pageIdx = 0;
+
+        Page<MusicMessage> page;
+        do {
+            PageRequest pageRequest = PageRequest.of(pageIdx, count);
+            page = musicMessageRepository.findByChatId(chatId, pageRequest);
+            page.forEach(it -> {
+                boolean exists = syncMusicMessageRepository.existsByOriginChatIdAndOriginMessageId(chatId, it.getMessageId());
+                if (!exists) {
+                    results.add(it);
+                }
+            });
+
+            if (results.size() >= count) {
+                break;
+            }
+
+            pageIdx += 1;
+        } while (page.hasNext());
+
+        return results;
+    }
+
+    @Nullable
+    public TdApi.Chat queryNewChat(@NonNull TelegramClient telegramClient, long chatId) {
+        Response<TdApi.Chat> response = telegramClient.send(new TdApi.GetChat(chatId));
+        TdApi.Chat chat = response.getObject().orElse(null);
+        if (chat == null) {
+            return null;
+        }
+
+        String newChatTitle = ChannelSyncService.getChatTitleForMusicSource(chat.title);
+        List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+        if (chats == null || chats.isEmpty()) {
+            return null;
+        }
+
+        for (TdApi.Chat t : chats) {
+            if (t.title.equals(newChatTitle)) {
+                return t;
+            }
+        }
+
+        return null;
     }
 }
 

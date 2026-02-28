@@ -1,15 +1,14 @@
 package dev.voroby.telegram.music.service;
 
 import dev.voroby.springframework.telegram.client.TelegramClient;
-import dev.voroby.springframework.telegram.client.templates.response.Response;
 import dev.voroby.telegram.music.dto.FolderItem;
 import dev.voroby.telegram.music.dto.MusicItem;
 import dev.voroby.telegram.music.model.MusicMessage;
 import dev.voroby.telegram.music.repository.ChannelInfoRepository;
 import dev.voroby.telegram.music.repository.MusicMessageRepository;
-import jakarta.annotation.Nullable;
-import lombok.extern.slf4j.Slf4j;
 import org.drinkless.tdlib.TdApi;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,20 +24,24 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController("musicStreamService")
-@Slf4j
 @RequestMapping("/music")
 public class MusicStreamService {
+    private static final Logger log = LoggerFactory.getLogger(MusicStreamService.class);
+
     private final TelegramClient telegramClient; // 假设这是你封装的 TDLib 客户端
 
     private final MusicMessageRepository musicMessageRepository;
 
     private final ChannelInfoRepository channelInfoRepository;
 
+    private final MusicSyncService musicSyncService;
+
     public MusicStreamService(TelegramClient telegramClient, MusicMessageRepository musicMessageRepository,
-                              ChannelInfoRepository channelInfoRepository) {
+                              ChannelInfoRepository channelInfoRepository, MusicSyncService musicSyncService) {
         this.telegramClient = telegramClient;
         this.musicMessageRepository = musicMessageRepository;
         this.channelInfoRepository = channelInfoRepository;
+        this.musicSyncService = musicSyncService;
     }
 
     @GetMapping("/folders")
@@ -54,54 +57,6 @@ public class MusicStreamService {
                 .map(it -> new MusicItem(it.getChatId(), it.getMessageId(), it.getFileName(),
                         it.getMimeType(), it.getTitle(), it.getPerformer(), it.getDurationSeconds(), it.getAudioFileSize())
                 ).collect(Collectors.toList());
-    }
-
-    @Nullable
-    private TdApi.File downloadFile(long chatId, long messageId) {
-        log.info("downloadFile: {}", messageId);
-        Response<TdApi.Message> rspMsg = telegramClient.send(new TdApi.GetMessage(chatId, messageId));
-        TdApi.Message message = rspMsg.getObject().orElse(null);
-        if (message == null) {
-            log.error("downloadFile: failed to find msg -> {}", messageId);
-            return null;
-        }
-
-        TdApi.MessageContent content = message.content;
-        int fileId = 0;
-        if (content instanceof TdApi.MessageAudio ma && ma.audio != null) {
-            TdApi.Audio audio = ma.audio;
-            fileId = audio.audio.id;
-        } else if (content instanceof TdApi.MessageDocument md && md.document != null) {
-            fileId = md.document.document.id;
-        }
-        if (fileId == 0) {
-            log.error("downloadFile: failed to find fileId -> {}", messageId);
-            return null;
-        }
-
-        Response<TdApi.File> response = telegramClient.send(new TdApi.GetFile(fileId));
-        TdApi.Error error = response.getError().orElse(null);
-        if (error != null) {
-            log.error("downloadFile error: {}", error);
-            return null;
-        }
-
-        TdApi.File file = response.getObject().orElseThrow();
-        String path = file.local.path;
-        log.info("local path {}", path);
-        if (file.local.isDownloadingCompleted) {
-            log.info("file is downloaded");
-            return file;
-        }
-
-        if (!file.local.canBeDownloaded) {
-            log.info("local can't be downloaded");
-            return null;
-        }
-
-        log.info("request to download");
-        telegramClient.send(new TdApi.DownloadFile(fileId, 1, 0, 0, false));
-        return file;
     }
 
     @GetMapping("/stream/{msgId}")
@@ -125,7 +80,7 @@ public class MusicStreamService {
             return ResponseEntity.notFound().build();
         }
 
-        TdApi.File tdFile = downloadFile(chatId, msgId);
+        TdApi.File tdFile = musicSyncService.downloadFile(chatId, msgId);
         if (tdFile == null) {
             return ResponseEntity.notFound().build();
         }
@@ -169,8 +124,8 @@ public class MusicStreamService {
                                 log.warn("interrupted while waiting for file to be downloaded");
                             }
 
-                            TdApi.File fileTd = telegramClient.send(new TdApi.GetFile(tdFile.id)).getObjectOrThrow();
-                            filePath = fileTd.local.path;
+                            TdApi.File fileTd = musicSyncService.queryFile(tdFile.id);
+                            filePath = fileTd == null ? null : fileTd.local.path;
                             continue;
                         }
 
@@ -182,8 +137,8 @@ public class MusicStreamService {
                                 log.warn("interrupted while waiting for {}", filePath, e);
                             }
 
-                            TdApi.File fileTd = telegramClient.send(new TdApi.GetFile(tdFile.id)).getObjectOrThrow();
-                            filePath = fileTd.local.path;
+                            TdApi.File fileTd = musicSyncService.queryFile(tdFile.id);
+                            filePath = fileTd == null ? null : fileTd.local.path;
                             continue;
                         }
 
@@ -213,4 +168,9 @@ public class MusicStreamService {
                 });
     }
 
+    @GetMapping("/sync")
+    public ResponseEntity<Object> syncMusicMessage(@RequestParam(name = "cnt", defaultValue = "10") int count) {
+        musicSyncService.syncMusicMessages(count);
+        return ResponseEntity.ok().build();
+    }
 }

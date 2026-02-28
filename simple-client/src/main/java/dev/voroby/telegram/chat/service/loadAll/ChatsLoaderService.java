@@ -1,15 +1,16 @@
 package dev.voroby.telegram.chat.service.loadAll;
 
 import dev.voroby.springframework.telegram.TelegramRunner;
-import org.drinkless.tdlib.TdApi;
 import dev.voroby.springframework.telegram.client.TelegramClient;
-import lombok.extern.slf4j.Slf4j;
+import org.drinkless.tdlib.TdApi;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.stereotype.Component;
 
-@Slf4j
 @Component
 public class ChatsLoaderService implements TelegramRunner {
+    private static final Logger log = LoggerFactory.getLogger(ChatsLoaderService.class);
 
     private final TelegramClient telegramClient;
 
