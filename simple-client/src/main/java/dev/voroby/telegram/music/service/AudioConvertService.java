@@ -58,7 +58,8 @@ public class AudioConvertService {
         }
 
         List<String> commands = Arrays.asList(
-                "ffmpeg", "-i", srcFilePath, "-f wav", "|", "opusenc", "--bitrate 128k", "--comp 10", "--vbr", destFilePath
+                "ffmpeg", "-i", srcFilePath, "-f wav", "-", "|", "opusenc", "--bitrate 128k", "--comp 10", "--vbr", "-",
+                destFilePath
         );
 
         String command = String.join(" ", commands);

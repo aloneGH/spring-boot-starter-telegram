@@ -4,8 +4,11 @@ import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
 import dev.voroby.telegram.music.cache.ChatFolderCache;
 import dev.voroby.telegram.music.model.ChannelInfo;
+import dev.voroby.telegram.music.model.SyncChannelInfo;
 import dev.voroby.telegram.music.repository.ChannelInfoRepository;
 import dev.voroby.telegram.music.repository.MusicMessageRepository;
+import dev.voroby.telegram.music.repository.SyncChannelInfoRepository;
+import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import org.drinkless.tdlib.TdApi;
@@ -32,8 +35,10 @@ public class ChannelSyncService {
 
     private final TelegramClient telegramClient;
     private final ChannelInfoRepository channelInfoRepository;
+    private final SyncChannelInfoRepository syncChannelInfoRepository;
     private final MusicMessageRepository musicMessageRepository;
     private final MusicSyncService musicSyncService;
+    private final SyncMusicMessageRepository syncMusicMessageRepository;
 
     /**
      * 需要同步的聊天文件夹名称。
@@ -46,12 +51,15 @@ public class ChannelSyncService {
     private String musicSourceFolderName;
 
     public ChannelSyncService(TelegramClient telegramClient,
-                              ChannelInfoRepository channelInfoRepository, MusicMessageRepository musicMessageRepository,
-                              MusicSyncService musicSyncService) {
+                              ChannelInfoRepository channelInfoRepository, SyncChannelInfoRepository syncChannelInfoRepository,
+                              MusicMessageRepository musicMessageRepository,
+                              MusicSyncService musicSyncService, SyncMusicMessageRepository syncMusicMessageRepository) {
         this.telegramClient = telegramClient;
         this.channelInfoRepository = channelInfoRepository;
+        this.syncChannelInfoRepository = syncChannelInfoRepository;
         this.musicMessageRepository = musicMessageRepository;
         this.musicSyncService = musicSyncService;
+        this.syncMusicMessageRepository = syncMusicMessageRepository;
     }
 
     /**
@@ -75,7 +83,6 @@ public class ChannelSyncService {
         }
 
         Set<Long> currentChatIds = new HashSet<>();
-
         for (TdApi.Chat chat : chats) {
             currentChatIds.add(chat.id);
             if (upsertChannel(chat, musicFolderName)) {
@@ -97,7 +104,30 @@ public class ChannelSyncService {
             log.error("删除本地中已经不存在的消息失败, remainIds={}", currentChatIds, e);
         }
 
-        syncMusicSourceChats(chats);
+        List<TdApi.Chat> syncedChats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+        if (syncedChats == null) {
+            syncedChats = new ArrayList<>();
+        }
+
+        Set<Long> currentSyncChannelIds = new HashSet<>();
+        for (TdApi.Chat chat : syncedChats) {
+            currentSyncChannelIds.add(chat.id);
+            upsertSyncChannel(chat, musicSourceFolderName);
+        }
+
+        try {
+            syncChannelInfoRepository.deleteByFolderNameAndChatIdNotIn(musicSourceFolderName, currentSyncChannelIds);
+        } catch (Exception e) {
+            log.error("删除本地已不存在的频道记录失败sync, folderName={}, remainIds={}", musicSourceFolderName, currentSyncChannelIds, e);
+        }
+
+        try {
+            syncMusicMessageRepository.deleteByChatIdNotIn(currentSyncChannelIds);
+        } catch (Exception e) {
+            log.error("删除本地中已经不存在的消息失败sync, remainIds={}", currentSyncChannelIds, e);
+        }
+
+        syncMusicSourceChats(chats, syncedChats);
     }
 
     @Nonnull
@@ -105,8 +135,13 @@ public class ChannelSyncService {
         return "CW-" + title;
     }
 
-    private synchronized void syncMusicSourceChats(@Nonnull List<TdApi.Chat> srcChats) {
-        List<TdApi.Chat> currentChats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+    @Nonnull
+    public static String restoreChatTitleForMusicSource(@Nonnull String title) {
+        return title.replace("CW-", "");
+    }
+
+    private synchronized void syncMusicSourceChats(@Nonnull List<TdApi.Chat> srcChats,
+                                                   @Nullable List<TdApi.Chat> currentChats) {
         if (currentChats == null) {
             log.error("no chats found for musicSourceFolderName={}", musicSourceFolderName);
             return;
@@ -167,6 +202,45 @@ public class ChannelSyncService {
 
         if (changed) {
             channelInfoRepository.save(existing);
+        }
+
+        return false;
+    }
+
+    private boolean upsertSyncChannel(TdApi.Chat chat, String folderName) {
+        Long chatId = chat.id;
+        SyncChannelInfo existing = syncChannelInfoRepository.findByChatId(chatId);
+
+        String title = chat.title;
+        String username = null;
+        String chatType = simplifyChatType(chat.type);
+
+        if (existing == null) {
+            SyncChannelInfo channelInfo = new SyncChannelInfo(chatId, title, username, chatType, folderName);
+            syncChannelInfoRepository.save(channelInfo);
+            return true;
+        }
+
+        boolean changed = false;
+        if (notEquals(existing.getTitle(), title)) {
+            existing.setTitle(title);
+            changed = true;
+        }
+        if (notEquals(existing.getUsername(), username)) {
+            existing.setUsername(username);
+            changed = true;
+        }
+        if (notEquals(existing.getChatType(), chatType)) {
+            existing.setChatType(chatType);
+            changed = true;
+        }
+        if (notEquals(existing.getFolderName(), folderName)) {
+            existing.setFolderName(folderName);
+            changed = true;
+        }
+
+        if (changed) {
+            syncChannelInfoRepository.save(existing);
         }
 
         return false;

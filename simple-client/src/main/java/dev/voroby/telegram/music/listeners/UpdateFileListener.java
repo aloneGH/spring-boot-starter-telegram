@@ -16,7 +16,7 @@ public class UpdateFileListener implements UpdateNotificationListener<TdApi.Upda
     @Override
     public void handleNotification(TdApi.UpdateFile notification) {
         TdApi.File file = notification.file;
-        if (file == null || !file.local.isDownloadingCompleted) {
+        if (file == null || !file.local.isDownloadingCompleted || file.remote.isUploadingActive) {
             return;
         }
 

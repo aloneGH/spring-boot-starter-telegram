@@ -1,11 +1,10 @@
 package dev.voroby.telegram.music.service;
 
-import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.telegram.music.dto.FolderItem;
 import dev.voroby.telegram.music.dto.MusicItem;
-import dev.voroby.telegram.music.model.MusicMessage;
-import dev.voroby.telegram.music.repository.ChannelInfoRepository;
-import dev.voroby.telegram.music.repository.MusicMessageRepository;
+import dev.voroby.telegram.music.model.SyncMusicMessage;
+import dev.voroby.telegram.music.repository.SyncChannelInfoRepository;
+import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,32 +27,30 @@ import java.util.stream.Collectors;
 public class MusicStreamService {
     private static final Logger log = LoggerFactory.getLogger(MusicStreamService.class);
 
-    private final TelegramClient telegramClient; // 假设这是你封装的 TDLib 客户端
+    private final SyncMusicMessageRepository syncMusicMessageRepository;
 
-    private final MusicMessageRepository musicMessageRepository;
-
-    private final ChannelInfoRepository channelInfoRepository;
+    private final SyncChannelInfoRepository syncChannelInfoRepository;
 
     private final MusicSyncService musicSyncService;
 
-    public MusicStreamService(TelegramClient telegramClient, MusicMessageRepository musicMessageRepository,
-                              ChannelInfoRepository channelInfoRepository, MusicSyncService musicSyncService) {
-        this.telegramClient = telegramClient;
-        this.musicMessageRepository = musicMessageRepository;
-        this.channelInfoRepository = channelInfoRepository;
+    public MusicStreamService(SyncMusicMessageRepository syncMusicMessageRepository,
+                              SyncChannelInfoRepository syncChannelInfoRepository, MusicSyncService musicSyncService) {
+        // 假设这是你封装的 TDLib 客户端
+        this.syncMusicMessageRepository = syncMusicMessageRepository;
+        this.syncChannelInfoRepository = syncChannelInfoRepository;
         this.musicSyncService = musicSyncService;
     }
 
     @GetMapping("/folders")
     public List<FolderItem> folders() {
-        return channelInfoRepository.findAll().stream()
-                .map(it -> new FolderItem(it.getChatId(), it.getTitle()))
+        return syncChannelInfoRepository.findAll().stream()
+                .map(it -> new FolderItem(it.getChatId(), ChannelSyncService.restoreChatTitleForMusicSource(it.getTitle())))
                 .collect(Collectors.toList());
     }
 
     @GetMapping("/folder/{fid}")
     public List<MusicItem> musicList(@PathVariable(name = "fid") long chatId) {
-        return musicMessageRepository.findAllByChatId(chatId).stream()
+        return syncMusicMessageRepository.findAllByChatId(chatId).stream()
                 .map(it -> new MusicItem(it.getChatId(), it.getMessageId(), it.getFileName(),
                         it.getMimeType(), it.getTitle(), it.getPerformer(), it.getDurationSeconds(), it.getAudioFileSize())
                 ).collect(Collectors.toList());
@@ -73,8 +70,8 @@ public class MusicStreamService {
         }
         final long finalStart = start;
 
-        List<MusicMessage> result = musicMessageRepository.findByChatIdAndMessageId(chatId, msgId);
-        MusicMessage musicMessage = result == null || result.isEmpty() ? null : result.get(0);
+        List<SyncMusicMessage> result = syncMusicMessageRepository.findByChatIdAndMessageId(chatId, msgId);
+        SyncMusicMessage musicMessage = result == null || result.isEmpty() ? null : result.get(0);
         if (musicMessage == null) {
             log.warn("no music message found for {}", msgId);
             return ResponseEntity.notFound().build();
@@ -86,7 +83,7 @@ public class MusicStreamService {
         }
 
         long itemSize = tdFile.size == 0 ? musicMessage.getAudioFileSize() : tdFile.size;
-        final long reqSize = size < 0 ? itemSize : size;
+        final long reqSize = size < 0 ? itemSize - start : size;
         if (start < 0 || reqSize > itemSize || start >= itemSize) {
             log.warn("invalid size: {} - {} -> {}", start, reqSize, itemSize);
             return ResponseEntity.badRequest().build();

@@ -10,6 +10,7 @@ import dev.voroby.telegram.music.repository.MusicMessageRepository;
 import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
+import org.apache.commons.io.FileUtils;
 import org.drinkless.tdlib.TdApi;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
@@ -23,6 +24,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,6 +51,7 @@ public class MusicSyncService {
     private final TelegramClient telegramClient;
     private final MusicMessageRepository musicMessageRepository;
     private final SyncMusicMessageRepository syncMusicMessageRepository;
+    private final AudioConvertService audioConvertService;
 
     public static final Map<Integer, CompletableFuture<TdApi.File>> downloadFutures = new ConcurrentHashMap<>();
 
@@ -62,10 +66,12 @@ public class MusicSyncService {
 
     public MusicSyncService(TelegramClient telegramClient,
                             MusicMessageRepository musicMessageRepository,
-                            SyncMusicMessageRepository syncMusicMessageRepository) {
+                            SyncMusicMessageRepository syncMusicMessageRepository,
+                            AudioConvertService audioConvertService) {
         this.telegramClient = telegramClient;
         this.musicMessageRepository = musicMessageRepository;
         this.syncMusicMessageRepository = syncMusicMessageRepository;
+        this.audioConvertService = audioConvertService;
     }
 
     @Async
@@ -353,20 +359,13 @@ public class MusicSyncService {
         log.info("downloadFile: {}", messageId);
         TdApi.Message message = queryMessage(chatId, messageId);
         if (message == null) {
-            log.error("downloadFile: failed to find msg -> {}", messageId);
+            log.error("downloadFile: failed to find msg -> {} -> {}", chatId, messageId);
             return null;
         }
 
-        TdApi.MessageContent content = message.content;
-        int fileId = 0;
-        if (content instanceof TdApi.MessageAudio ma && ma.audio != null) {
-            TdApi.Audio audio = ma.audio;
-            fileId = audio.audio.id;
-        } else if (content instanceof TdApi.MessageDocument md && md.document != null) {
-            fileId = md.document.document.id;
-        }
+        int fileId = getFileId(message);
         if (fileId == 0) {
-            log.error("downloadFile: failed to find fileId -> {}", messageId);
+            log.error("downloadFile: failed to find fileId -> {} -> {}", chatId, messageId);
             return null;
         }
 
@@ -378,7 +377,7 @@ public class MusicSyncService {
 
         String path = file.local.path;
         log.info("local path {}", path);
-        if (file.local.isDownloadingCompleted) {
+        if (file.local.isDownloadingCompleted && new File(path).exists()) {
             log.info("file is downloaded");
             return file;
         }
@@ -398,6 +397,25 @@ public class MusicSyncService {
 
         file = fileResponse.getObject().orElse(file);
         return file;
+    }
+
+    private static int getFileId(TdApi.Message message) {
+        TdApi.MessageContent content = message.content;
+        int fileId = 0;
+        if (content instanceof TdApi.MessageAudio ma && ma.audio != null) {
+            TdApi.Audio audio = ma.audio;
+            fileId = audio.audio.id;
+        } else if (content instanceof TdApi.MessageDocument md && md.document != null) {
+            fileId = md.document.document.id;
+        } else if (content instanceof TdApi.MessageVoiceNote mv && mv.voiceNote != null) {
+            fileId = mv.voiceNote.voice.id;
+        }
+        return fileId;
+    }
+
+    @Scheduled(fixedRate = 120_000)
+    public void syncMusic() {
+        syncMusicMessages(20);
     }
 
     public void syncMusicMessages(int count) {
@@ -447,9 +465,11 @@ public class MusicSyncService {
                 continue;
             }
 
-            CompletableFuture<Void> wholeChain = future.thenCompose(file -> sendAudioMessage(newChat.id, file, musicMessage))
+            CompletableFuture<Void> wholeChain = future
+                    .thenCompose(file -> convertMusicFormat(file, musicMessage))
+                    .thenCompose(file -> sendAudioMessage(newChat.id, file, musicMessage))
                     .thenAccept(message -> {
-                        SyncMusicMessage syncMusicMessage = new SyncMusicMessage(message.chatId, originChatId, message.id,
+                        SyncMusicMessage syncMusicMessage = new SyncMusicMessage(message.chatId, originChatId, -1L, message.id,
                                 musicMessage.getMessageId(), Instant.ofEpochSecond(message.date),
                                 musicMessage.getFileName(), musicMessage.getMimeType(), musicMessage.getTitle(),
                                 musicMessage.getPerformer(), musicMessage.getDurationSeconds(),
@@ -482,13 +502,62 @@ public class MusicSyncService {
     }
 
     @Nonnull
-    public CompletableFuture<TdApi.Message> sendAudioMessage(long chatId, @Nonnull TdApi.File file,
+    public CompletableFuture<File> convertMusicFormat(@Nonnull TdApi.File file,
+                                                      @Nonnull MusicMessage musicMessage) {
+        CompletableFuture<File> future = new CompletableFuture<>();
+
+        File srcFile = new File(file.local.path);
+        int small_file_size = 10 * 1024 * 1024;
+        if (file.size <= small_file_size) {
+            future.complete(srcFile);
+        } else {
+            File srcDir = srcFile.getParentFile().getParentFile();
+            File destDir = new File(srcDir, "converted");
+
+            try {
+                Files.createDirectories(destDir.toPath());
+            } catch (Exception e) {
+                log.error("convertMusicFormat: failed to create directories", e);
+                future.completeExceptionally(e);
+                return future;
+            }
+
+            String srcFilename = musicMessage.getFileName();
+            String dstFilename = srcFilename.substring(0, srcFilename.lastIndexOf('.')) + ".ogg";
+            String dstFileNameWithoutPath = dstFilename;
+            srcFilename = srcFile.getAbsolutePath();
+
+            File dstFile = new File(destDir, dstFilename);
+            dstFilename = dstFile.getAbsolutePath();
+            if (audioConvertService.convertToOpus(srcFilename, dstFilename)) {
+                musicMessage.setFileName(dstFileNameWithoutPath);
+                musicMessage.setMimeType("audio/ogg");
+                musicMessage.setAudioFileSize(dstFile.length());
+                FileUtils.deleteQuietly(srcFile);
+                future.complete(dstFile);
+            } else {
+                future.completeExceptionally(new RuntimeException("failed to convert audio file: " + srcFilename));
+            }
+        }
+
+        return future;
+    }
+
+    @Nonnull
+    public CompletableFuture<TdApi.Message> sendAudioMessage(long chatId, @Nonnull File file,
                                                              @Nonnull MusicMessage musicMessage) {
         CompletableFuture<TdApi.Message> future = new CompletableFuture<>();
 
-        TdApi.InputFileLocal inputFile = new TdApi.InputFileLocal(file.local.path);
-        TdApi.InputMessageAudio content = new TdApi.InputMessageAudio(inputFile, null,
-                musicMessage.getDurationSeconds(), musicMessage.getTitle(), musicMessage.getPerformer(), null);
+        boolean isOpusFile = file.getName().endsWith(".ogg");
+        TdApi.FormattedText caption = new TdApi.FormattedText(String.join("-", musicMessage.getTitle(),
+                musicMessage.getPerformer()), null);
+        TdApi.InputFileLocal inputFile = new TdApi.InputFileLocal(file.getAbsolutePath());
+        TdApi.InputMessageContent content = isOpusFile
+                ? new TdApi.InputMessageVoiceNote(inputFile, musicMessage.getDurationSeconds(), null, caption,
+                null)
+                : new TdApi.InputMessageAudio(inputFile, null, musicMessage.getDurationSeconds(),
+                musicMessage.getTitle(), musicMessage.getPerformer(),
+                caption);
 
         telegramClient.sendWithCallback(new TdApi.SendMessage(chatId, null, null, null, null, content),
                 (obj, error) -> {

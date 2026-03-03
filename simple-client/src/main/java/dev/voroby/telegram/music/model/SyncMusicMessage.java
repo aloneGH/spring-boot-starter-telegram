@@ -5,7 +5,9 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
-@Table(name = "sync_music_message", uniqueConstraints = {
+@Table(name = "sync_music_message", indexes = {
+        @Index(name = "message_id_temp", columnList = "message_id_temp")
+}, uniqueConstraints = {
         @UniqueConstraint(name = "uk_title_performer", columnNames = {"title", "performer"})
 })
 public class SyncMusicMessage {
@@ -25,8 +27,11 @@ public class SyncMusicMessage {
     /**
      * Telegram message id
      */
-    @Column(name = "message_id", nullable = false)
+    @Column(name = "message_id")
     private Long messageId;
+
+    @Column(name = "message_id_temp", nullable = false)
+    private Long messageIdTemp;
 
     @Column(name = "origin_message_id", nullable = false)
     private Long originMessageId;
@@ -94,13 +99,14 @@ public class SyncMusicMessage {
     public SyncMusicMessage() {
     }
 
-    public SyncMusicMessage(Long chatId, Long originChatId, Long messageId, Long originMessageId,
+    public SyncMusicMessage(Long chatId, Long originChatId, Long messageId, Long messageIdTemp, Long originMessageId,
                             Instant sentAt, String fileName, String mimeType, String title, String performer,
                             Integer durationSeconds, Integer coverFileId, Integer coverWidth, Integer coverHeight,
                             Long audioFileSize) {
         this.chatId = chatId;
         this.originChatId = originChatId;
         this.messageId = messageId;
+        this.messageIdTemp = messageIdTemp;
         this.originMessageId = originMessageId;
         this.sentAt = sentAt;
         this.fileName = fileName;
@@ -144,6 +150,14 @@ public class SyncMusicMessage {
 
     public void setMessageId(Long messageId) {
         this.messageId = messageId;
+    }
+
+    public Long getMessageIdTemp() {
+        return messageIdTemp;
+    }
+
+    public void setMessageIdTemp(Long messageIdTemp) {
+        this.messageIdTemp = messageIdTemp;
     }
 
     public Long getOriginMessageId() {
