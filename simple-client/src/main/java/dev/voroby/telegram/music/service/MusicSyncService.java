@@ -28,7 +28,6 @@ import java.io.File;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -415,7 +414,7 @@ public class MusicSyncService {
 
     @Scheduled(fixedRate = 120_000)
     public void syncMusic() {
-        syncMusicMessages(20);
+        syncMusicMessages(300);
     }
 
     public void syncMusicMessages(int count) {
@@ -441,8 +440,6 @@ public class MusicSyncService {
             return;
         }
 
-        List<SyncMusicMessage> toSave = Collections.synchronizedList(new ArrayList<>());
-        List<Integer> downloadFileIds = new ArrayList<>();
         List<CompletableFuture<?>> allChains = new ArrayList<>();
 
         for (MusicMessage musicMessage : unsyncMusicMessage) {
@@ -457,7 +454,6 @@ public class MusicSyncService {
 
             CompletableFuture<TdApi.File> future = new CompletableFuture<>();
             downloadFutures.put(tdFile.id, future);
-            downloadFileIds.add(tdFile.id);
 
             TdApi.Chat newChat = queryNewChat(telegramClient, originChatId);
             if (newChat == null) {
@@ -475,16 +471,14 @@ public class MusicSyncService {
                                 musicMessage.getPerformer(), musicMessage.getDurationSeconds(),
                                 musicMessage.getCoverFileId(), musicMessage.getCoverWidth(), musicMessage.getCoverHeight(),
                                 musicMessage.getAudioFileSize());
-                        toSave.add(syncMusicMessage);
+                        syncMusicMessageRepository.save(syncMusicMessage);
+                        downloadFutures.remove(tdFile.id);
                     }).exceptionally(ex -> {
                         log.error("syncMusicMessages error: {}", ex.getMessage());
+                        downloadFutures.remove(tdFile.id);
                         return null;
                     });
             allChains.add(wholeChain);
-
-            if (tdFile.local.isDownloadingCompleted) {
-                future.complete(tdFile);
-            }
         }
 
         try {
@@ -492,12 +486,6 @@ public class MusicSyncService {
                     .get(30L * count, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("syncMusicMessages: timeout", e);
-        } finally {
-            for (Integer downloadFileId : downloadFileIds) {
-                downloadFutures.remove(downloadFileId);
-            }
-
-            syncMusicMessageRepository.saveAll(toSave);
         }
     }
 
@@ -533,11 +521,11 @@ public class MusicSyncService {
                 musicMessage.setFileName(dstFileNameWithoutPath);
                 musicMessage.setMimeType("audio/ogg");
                 musicMessage.setAudioFileSize(dstFile.length());
-                FileUtils.deleteQuietly(srcFile);
                 future.complete(dstFile);
             } else {
                 future.completeExceptionally(new RuntimeException("failed to convert audio file: " + srcFilename));
             }
+            FileUtils.deleteQuietly(srcFile);
         }
 
         return future;

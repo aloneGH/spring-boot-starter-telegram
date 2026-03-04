@@ -29,13 +29,15 @@ public class AudioConvertService {
 
             // 读取控制台输出（必须读取，否则缓冲区满会导致进程卡死）
             String line;
+            StringBuilder output = new StringBuilder();
             while ((line = reader.readLine()) != null) {
                 log.debug("exe command output: {}", line);
+                output.append(line).append("\r\n");
             }
 
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                log.error("exe command failed with exit code: {}", exitCode);
+                log.error("exe command failed with exit code: {} -> {} -> {}", exitCode, command, output);
                 return false;
             }
 
@@ -52,6 +54,9 @@ public class AudioConvertService {
         if (srcFilePath == null || destFilePath == null) {
             return false;
         }
+
+        srcFilePath = "\"" + srcFilePath + "\"";
+        destFilePath = "\"" + destFilePath + "\"";
 
         if (srcFilePath.endsWith(".flac")) {
             return convertFromFlacToOpus(srcFilePath, destFilePath);

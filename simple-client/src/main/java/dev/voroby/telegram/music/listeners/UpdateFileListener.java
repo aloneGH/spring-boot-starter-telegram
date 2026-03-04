@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class UpdateFileListener implements UpdateNotificationListener<TdApi.UpdateFile> {
@@ -16,16 +17,19 @@ public class UpdateFileListener implements UpdateNotificationListener<TdApi.Upda
     @Override
     public void handleNotification(TdApi.UpdateFile notification) {
         TdApi.File file = notification.file;
-        if (file == null || !file.local.isDownloadingCompleted || file.remote.isUploadingActive) {
+        if (file == null || !file.local.isDownloadingCompleted || file.remote.isUploadingActive
+                || !file.remote.isUploadingCompleted) {
             return;
         }
 
         log.info("handleNotification: {}, size = {}", file.local.path, file.expectedSize);
-        CompletableFuture<TdApi.File> future = MusicSyncService.downloadFutures.get(file.id);
+        final CompletableFuture<TdApi.File> future = MusicSyncService.downloadFutures.get(file.id);
         if (future == null) {
             return;
         }
-        future.complete(file);
+
+        MusicSyncService.downloadFutures.remove(file.id);
+        CompletableFuture.delayedExecutor(2, TimeUnit.SECONDS).execute(() -> future.complete(file));
     }
 
     @Override
