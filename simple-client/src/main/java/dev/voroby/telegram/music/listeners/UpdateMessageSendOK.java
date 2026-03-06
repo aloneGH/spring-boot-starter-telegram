@@ -38,15 +38,14 @@ public class UpdateMessageSendOK implements UpdateNotificationListener<TdApi.Upd
                 ThreadUtils.sleepQuietly(Duration.ofMillis(500));
             }
 
-            String filePath = getFilePath(notification);
+            String filePath = getFilePath(notification.message);
             if (filePath != null) {
                 FileUtils.deleteQuietly(new File(filePath));
             }
         });
     }
 
-    private static String getFilePath(TdApi.UpdateMessageSendSucceeded notification) {
-        TdApi.Message message = notification.message;
+    public static String getFilePath(TdApi.Message message) {
         TdApi.MessageContent content = message.content;
 
         String filePath = null;

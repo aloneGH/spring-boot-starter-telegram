@@ -317,7 +317,8 @@ public class MusicSyncService {
                 coverWidth,
                 coverHeight,
                 audioFileId,
-                audioFileSize
+                audioFileSize,
+                0
         );
     }
 
@@ -412,9 +413,9 @@ public class MusicSyncService {
         return fileId;
     }
 
-    @Scheduled(fixedRate = 120_000)
+    @Scheduled(fixedDelay = 120_000)
     public void syncMusic() {
-        syncMusicMessages(300);
+        syncMusicMessages(100);
     }
 
     public void syncMusicMessages(int count) {
@@ -472,18 +473,25 @@ public class MusicSyncService {
                                 musicMessage.getCoverFileId(), musicMessage.getCoverWidth(), musicMessage.getCoverHeight(),
                                 musicMessage.getAudioFileSize());
                         syncMusicMessageRepository.save(syncMusicMessage);
+                        musicMessageRepository.updateSyncById(1, musicMessage.getId());
                         downloadFutures.remove(tdFile.id);
                     }).exceptionally(ex -> {
                         log.error("syncMusicMessages error: {}", ex.getMessage());
+                        musicMessageRepository.updateSyncById(2, musicMessage.getId());
                         downloadFutures.remove(tdFile.id);
                         return null;
                     });
+
             allChains.add(wholeChain);
+            
+            if (tdFile.local.isDownloadingCompleted && new File(tdFile.local.path).exists()) {
+                future.complete(tdFile);
+            }
         }
 
         try {
             CompletableFuture.allOf(allChains.toArray(CompletableFuture[]::new))
-                    .get(30L * count, TimeUnit.SECONDS);
+                    .get(180L, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("syncMusicMessages: timeout", e);
         }
@@ -567,7 +575,7 @@ public class MusicSyncService {
         Page<MusicMessage> page;
         do {
             PageRequest pageRequest = PageRequest.of(pageIdx, count);
-            page = musicMessageRepository.findByChatId(chatId, pageRequest);
+            page = musicMessageRepository.findByChatIdAndSyncIsNullOrSyncLessThan(chatId, 1, pageRequest);
             page.forEach(it -> {
                 boolean exists = syncMusicMessageRepository.existsByOriginChatIdAndOriginMessageId(chatId, it.getMessageId());
                 if (!exists) {

@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
@@ -38,5 +39,14 @@ public interface MusicMessageRepository extends JpaRepository<MusicMessage, Long
     List<MusicMessage> findAllByChatId(Long chatId);
 
     Page<MusicMessage> findByChatId(Long chatId, Pageable pageable);
+
+    @Transactional
+    @Modifying
+    @Query("update MusicMessage m set m.sync = ?1 where m.id = ?2")
+    int updateSyncById(Integer sync, Long id);
+
+    Page<MusicMessage> findByChatIdAndSyncLessThan(long chatId, int sync, Pageable pageable);
+
+    Page<MusicMessage> findByChatIdAndSyncIsNullOrSyncLessThan(Long chatId, Integer sync, Pageable pageable);
 }
 

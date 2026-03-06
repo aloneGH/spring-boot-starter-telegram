@@ -99,6 +99,9 @@ public class MusicMessage {
     @Column(name = "audio_file_size")
     private Long audioFileSize;
 
+    @Column(name = "sync")
+    private Integer sync;
+
     public MusicMessage() {
     }
 
@@ -114,7 +117,8 @@ public class MusicMessage {
                         Integer coverWidth,
                         Integer coverHeight,
                         Integer audioFileId,
-                        Long audioFileSize) {
+                        Long audioFileSize,
+                        Integer sync) {
         this.chatId = chatId;
         this.messageId = messageId;
         this.sentAt = sentAt;
@@ -128,6 +132,7 @@ public class MusicMessage {
         this.coverHeight = coverHeight;
         this.audioFileId = audioFileId;
         this.audioFileSize = audioFileSize;
+        this.sync = sync;
     }
 
     public Long getId() {
@@ -236,6 +241,14 @@ public class MusicMessage {
 
     public void setAudioFileSize(Long audioFileSize) {
         this.audioFileSize = audioFileSize;
+    }
+
+    public Integer getSync() {
+        return sync;
+    }
+
+    public void setSync(Integer sync) {
+        this.sync = sync;
     }
 }
 
