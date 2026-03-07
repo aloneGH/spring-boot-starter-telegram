@@ -5,6 +5,7 @@ import dev.voroby.telegram.music.dto.MusicItem;
 import dev.voroby.telegram.music.model.SyncMusicMessage;
 import dev.voroby.telegram.music.repository.SyncChannelInfoRepository;
 import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
+import org.apache.commons.io.FilenameUtils;
 import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.ObjectUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.util.UriUtils;
@@ -51,9 +53,12 @@ public class MusicStreamService {
     @GetMapping("/folder/{fid}")
     public List<MusicItem> musicList(@PathVariable(name = "fid") long chatId) {
         return syncMusicMessageRepository.findAllByChatId(chatId).stream()
-                .map(it -> new MusicItem(it.getChatId(), it.getMessageId(), it.getFileName(),
-                        it.getMimeType(), it.getTitle(), it.getPerformer(), it.getDurationSeconds(), it.getAudioFileSize())
-                ).collect(Collectors.toList());
+                .map(it -> {
+                    String title = StringUtils.hasText(it.getTitle()) ? it.getTitle()
+                            : FilenameUtils.getBaseName(it.getFileName()).trim();
+                    return new MusicItem(it.getChatId(), it.getMessageId(), it.getFileName(), it.getMimeType(),
+                            title, it.getPerformer(), it.getDurationSeconds(), it.getAudioFileSize());
+                }).collect(Collectors.toList());
     }
 
     @GetMapping("/stream/{msgId}")
