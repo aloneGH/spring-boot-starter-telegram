@@ -24,6 +24,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -528,6 +529,13 @@ public class MusicSyncService {
                 if (musicMessage.getDurationSeconds() == 0) {
                     musicMessage.setDurationSeconds(audioConvertService.queryDuration(dstFilename));
                 }
+
+                if (!StringUtils.hasText(musicMessage.getTitle())) {
+                    Map<String, String> id3Info = audioConvertService.queryID3Info(srcFilename);
+                    musicMessage.setTitle(id3Info.getOrDefault(AudioConvertService.ID3_TITLE, ""));
+                    musicMessage.setPerformer(id3Info.getOrDefault(AudioConvertService.ID3_ARTIST, ""));
+                }
+
                 musicMessage.setFileName(dstFileNameWithoutPath);
                 musicMessage.setMimeType("audio/ogg");
                 musicMessage.setAudioFileSize(dstFile.length());
@@ -696,4 +704,3 @@ public class MusicSyncService {
         log.info("fixMusicDuration: cnt = {}", success[0]);
     }
 }
-

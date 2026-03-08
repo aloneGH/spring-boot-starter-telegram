@@ -1,20 +1,25 @@
 package dev.voroby.telegram.music.service;
 
+import com.google.gson.Gson;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 @Service
 public class AudioConvertService {
     private static final Logger log = LoggerFactory.getLogger(AudioConvertService.class);
+
+    public static final String ID3_TITLE = "title";
+    public static final String ID3_ARTIST = "artist";
+    public static final String ID3_ALBUM = "album";
 
     public AudioConvertService() {
     }
@@ -62,6 +67,8 @@ public class AudioConvertService {
             return false;
         }
 
+        Map<String, String> id3Info = queryID3Info(srcFilePath);
+
         srcFilePath = "\"" + srcFilePath + "\"";
         destFilePath = "\"" + destFilePath + "\"";
 
@@ -70,9 +77,23 @@ public class AudioConvertService {
         }
 
         List<String> commands = Arrays.asList(
-                "ffmpeg", "-i", srcFilePath, "-f wav", "-", "|", "opusenc", "--bitrate 128k", "--comp 10", "--vbr", "-",
-                destFilePath
+                "ffmpeg", "-i", srcFilePath, "-f wav", "-", "|", "opusenc", "--bitrate 128k", "--comp 10", "--vbr"
         );
+        commands = new ArrayList<>(commands);
+        String title = id3Info.getOrDefault(ID3_TITLE, null);
+        if (StringUtils.hasText(title)) {
+            commands.add("--title \"" + title + "\"");
+        }
+        String artist = id3Info.getOrDefault(ID3_ARTIST, null);
+        if (StringUtils.hasText(artist)) {
+            commands.add("--artist \"" + artist + "\"");
+        }
+        String album = id3Info.getOrDefault(ID3_ALBUM, null);
+        if (StringUtils.hasText(album)) {
+            commands.add("--album \"" + album + "\"");
+        }
+        commands.add("-");
+        commands.add(destFilePath);
 
         String command = String.join(" ", commands);
         boolean success = exeCommand(command);
@@ -102,7 +123,7 @@ public class AudioConvertService {
 
         filePath = "\"" + filePath + "\"";
         List<String> commands = Arrays.asList(
-                "ffprobe", "-v error", "-show_entries", "format=duration", "-of default=noprint_wrappers=1:nokey=1", filePath
+                "ffprobe", "-v error", "-show_entries", "format=duration", "-print_format json", filePath
         );
         String command = String.join(" ", commands);
         StringBuilder output = new StringBuilder();
@@ -113,10 +134,42 @@ public class AudioConvertService {
 
         try {
             log.info("queryDuration: {} -> {}", filePath, output);
-            return (int) Float.parseFloat(output.toString());
+            FFProbeDuration probeResult = new Gson().fromJson(output.toString(), FFProbeDuration.class);
+            return (int) Float.parseFloat(probeResult.format.duration);
         } catch (Exception e) {
             log.error("Failed to parse duration: {}", output);
         }
         return 0;
+    }
+
+    public Map<String, String> queryID3Info(@Nullable String filePath) {
+        Map<String, String> result = new HashMap<>();
+        if (filePath == null) {
+            log.warn("queryID3Info: failed, filePath is null");
+            return result;
+        }
+
+        filePath = "\"" + filePath + "\"";
+        List<String> commands = Arrays.asList(
+                "ffprobe", "-v error", "-show_entries", "format_tags=title,artist,album", "-print_format json", filePath
+        );
+
+        String command = String.join(" ", commands);
+        StringBuilder output = new StringBuilder();
+        boolean success = exeCommand(command, output);
+        if (!success) {
+            return result;
+        }
+
+        try {
+            FFProbeId3Info probeResult = new Gson().fromJson(output.toString(), FFProbeId3Info.class);
+            result.put(ID3_TITLE, probeResult.format.tags.getOrDefault("title", "").trim());
+            result.put(ID3_ARTIST, probeResult.format.tags.getOrDefault("artist", "").trim());
+            result.put(ID3_ALBUM, probeResult.format.tags.getOrDefault("album", "").trim());
+        } catch (Exception e) {
+            log.error("Failed to parse id3 info: {}", output);
+        }
+
+        return result;
     }
 }
