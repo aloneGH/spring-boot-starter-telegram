@@ -16,7 +16,10 @@ import java.util.List;
 public class AudioConvertService {
     private static final Logger log = LoggerFactory.getLogger(AudioConvertService.class);
 
-    private boolean exeCommand(@Nonnull String command) {
+    public AudioConvertService() {
+    }
+
+    private boolean exeCommand(@Nonnull String command, @Nonnull StringBuilder output) {
         ProcessBuilder processBuilder = new ProcessBuilder("/bin/sh", "-c", command);
 
         // 合并错误流到标准输出，方便调试
@@ -29,7 +32,6 @@ public class AudioConvertService {
 
             // 读取控制台输出（必须读取，否则缓冲区满会导致进程卡死）
             String line;
-            StringBuilder output = new StringBuilder();
             while ((line = reader.readLine()) != null) {
                 log.debug("exe command output: {}", line);
                 output.append(line).append("\r\n");
@@ -44,10 +46,15 @@ public class AudioConvertService {
             return true;
         } catch (Exception e) {
             log.error("exe command failed", e);
-            return false;
         } finally {
             IOUtils.closeQuietly(reader);
         }
+
+        return false;
+    }
+
+    private boolean exeCommand(@Nonnull String command) {
+        return exeCommand(command, new StringBuilder());
     }
 
     public boolean convertToOpus(@Nullable String srcFilePath, @Nullable String destFilePath) {
@@ -85,5 +92,31 @@ public class AudioConvertService {
         );
         String command = String.join(" ", commands);
         return exeCommand(command);
+    }
+
+    public int queryDuration(@Nullable String filePath) {
+        if (filePath == null) {
+            log.warn("queryDuration: failed, filePath is null");
+            return 0;
+        }
+
+        filePath = "\"" + filePath + "\"";
+        List<String> commands = Arrays.asList(
+                "ffprobe", "-v error", "-show_entries", "format=duration", "-of default=noprint_wrappers=1:nokey=1", filePath
+        );
+        String command = String.join(" ", commands);
+        StringBuilder output = new StringBuilder();
+        boolean success = exeCommand(command, output);
+        if (!success) {
+            return 0;
+        }
+
+        try {
+            log.info("queryDuration: {} -> {}", filePath, output);
+            return (int) Float.parseFloat(output.toString());
+        } catch (Exception e) {
+            log.error("Failed to parse duration: {}", output);
+        }
+        return 0;
     }
 }

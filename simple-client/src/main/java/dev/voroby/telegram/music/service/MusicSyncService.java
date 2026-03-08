@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
@@ -441,8 +442,7 @@ public class MusicSyncService {
             return;
         }
 
-        List<CompletableFuture<?>> allChains = new ArrayList<>();
-
+        int success = 0;
         for (MusicMessage musicMessage : unsyncMusicMessage) {
             long originChatId = musicMessage.getChatId();
             long messageId = musicMessage.getMessageId();
@@ -471,7 +471,7 @@ public class MusicSyncService {
                                 musicMessage.getFileName(), musicMessage.getMimeType(), musicMessage.getTitle(),
                                 musicMessage.getPerformer(), musicMessage.getDurationSeconds(),
                                 musicMessage.getCoverFileId(), musicMessage.getCoverWidth(), musicMessage.getCoverHeight(),
-                                musicMessage.getAudioFileSize());
+                                musicMessage.getAudioFileSize(), 0);
                         syncMusicMessageRepository.save(syncMusicMessage);
                         musicMessageRepository.updateSyncById(1, musicMessage.getId());
                         downloadFutures.remove(tdFile.id);
@@ -482,19 +482,18 @@ public class MusicSyncService {
                         return null;
                     });
 
-            allChains.add(wholeChain);
-            
             if (tdFile.local.isDownloadingCompleted && new File(tdFile.local.path).exists()) {
                 future.complete(tdFile);
             }
+
+            try {
+                wholeChain.get(180L, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.error("syncMusicMessages: timeout -> {}", musicMessage, e);
+            }
         }
 
-        try {
-            CompletableFuture.allOf(allChains.toArray(CompletableFuture[]::new))
-                    .get(180L, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.error("syncMusicMessages: timeout", e);
-        }
+        log.info("syncMusicMessages: done, success count={}", success);
     }
 
     @Nonnull
@@ -526,6 +525,9 @@ public class MusicSyncService {
             File dstFile = new File(destDir, dstFilename);
             dstFilename = dstFile.getAbsolutePath();
             if (audioConvertService.convertToOpus(srcFilename, dstFilename)) {
+                if (musicMessage.getDurationSeconds() == 0) {
+                    musicMessage.setDurationSeconds(audioConvertService.queryDuration(dstFilename));
+                }
                 musicMessage.setFileName(dstFileNameWithoutPath);
                 musicMessage.setMimeType("audio/ogg");
                 musicMessage.setAudioFileSize(dstFile.length());
@@ -614,6 +616,84 @@ public class MusicSyncService {
         }
 
         return null;
+    }
+
+    @Scheduled(fixedDelay = 180_000)
+    public void fixMusicDuration() {
+        fixMusicDuration(100);
+    }
+
+    public void fixMusicDuration(int count) {
+        log.info("fixMusicDuration: {}", count);
+        List<SyncMusicMessage> data = syncMusicMessageRepository.findByFixDurationIsNullOrFixDurationLessThan(
+                0, Limit.of(count)
+        );
+
+        if (data == null || data.isEmpty()) {
+            log.info("fixMusicDuration: empty data");
+            return;
+        }
+
+        int[] success = {0};
+        int idx = 0;
+        for (SyncMusicMessage message : data) {
+            log.info("fixMusicDuration: idx = {}", idx++);
+            message.setFixDuration(1);
+
+            if (message.getDurationSeconds() != 0) {
+                syncMusicMessageRepository.save(message);
+                continue;
+            }
+
+            if (message.getMessageId() == -1) {
+                syncMusicMessageRepository.save(message);
+                continue;
+            }
+
+            TdApi.File tdFile = downloadFile(message.getChatId(), message.getMessageId());
+            if (tdFile == null) {
+                log.error("fixMusicDuration: failed to download file, {} -> {}", message.getChatId(),
+                        message.getMessageId());
+                syncMusicMessageRepository.save(message);
+                continue;
+            }
+
+            CompletableFuture<TdApi.File> future = new CompletableFuture<>();
+            downloadFutures.put(tdFile.id, future);
+
+            CompletableFuture<Void> wholeChain = future
+                    .thenApply(file -> {
+                        String path = file.local.path;
+                        int duration = audioConvertService.queryDuration(path);
+                        log.info("fixMusicDuration: duration = {}", duration);
+                        FileUtils.deleteQuietly(new File(path));
+                        return duration;
+                    })
+                    .thenAccept(duration -> {
+                        message.setDurationSeconds(duration);
+                        log.info("fixMusicDuration: update to {}", message);
+                        syncMusicMessageRepository.save(message);
+                        success[0] += 1;
+                        downloadFutures.remove(tdFile.id);
+                    })
+                    .exceptionally(ex -> {
+                        log.error("fixMusicDuration: failed -> {}", message, ex);
+                        downloadFutures.remove(tdFile.id);
+                        return null;
+                    });
+
+            if (tdFile.local.isDownloadingCompleted && new File(tdFile.local.path).exists()) {
+                future.complete(tdFile);
+            }
+
+            try {
+                wholeChain.get(180L, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.error("fixMusicDuration: timeout -> {}", message, e);
+            }
+        }
+
+        log.info("fixMusicDuration: cnt = {}", success[0]);
     }
 }
 

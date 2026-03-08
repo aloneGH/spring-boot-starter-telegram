@@ -53,6 +53,7 @@ public class MusicStreamService {
     @GetMapping("/folder/{fid}")
     public List<MusicItem> musicList(@PathVariable(name = "fid") long chatId) {
         return syncMusicMessageRepository.findAllByChatId(chatId).stream()
+                .filter(it -> it.getChatId() != -1 && it.getMessageId() != -1)
                 .map(it -> {
                     String title = StringUtils.hasText(it.getTitle()) ? it.getTitle()
                             : FilenameUtils.getBaseName(it.getFileName()).trim();

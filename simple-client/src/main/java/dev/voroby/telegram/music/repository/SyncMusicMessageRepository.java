@@ -2,6 +2,7 @@ package dev.voroby.telegram.music.repository;
 
 import dev.voroby.telegram.music.model.SyncMusicMessage;
 import jakarta.transaction.Transactional;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -30,5 +31,13 @@ public interface SyncMusicMessageRepository extends JpaRepository<SyncMusicMessa
     @Modifying
     @Query("update SyncMusicMessage s set s.messageId = ?1 where s.messageIdTemp = ?2 and s.chatId = ?3")
     int updateMessageIdByMessageIdTemp(Long messageId, Long messageIdTemp, Long chatId);
+
+    List<SyncMusicMessage> findByFixDurationIsNullOrFixDurationLessThanAndDurationSeconds(Integer fixDuration
+            , Integer durationSeconds, Limit limit);
+
+    List<SyncMusicMessage> findByMessageId(Long messageId);
+
+    List<SyncMusicMessage> findByFixDurationIsNullOrFixDurationLessThan(Integer fixDurationIsLessThan,
+                                                                        Limit limit);
 }
 

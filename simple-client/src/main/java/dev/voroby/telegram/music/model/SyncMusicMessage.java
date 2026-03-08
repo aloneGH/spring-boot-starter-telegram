@@ -6,7 +6,8 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "sync_music_message", indexes = {
-        @Index(name = "message_id_temp", columnList = "message_id_temp")
+        @Index(name = "message_id_temp", columnList = "message_id_temp"),
+        @Index(name = "fix_duration", columnList = "duration_seconds, fixDuration")
 }, uniqueConstraints = {
         @UniqueConstraint(name = "uk_title_performer", columnNames = {"title", "performer"})
 })
@@ -96,13 +97,16 @@ public class SyncMusicMessage {
     @Column(name = "audio_file_size")
     private Long audioFileSize;
 
+    @Column(name = "fix_duration")
+    private Integer fixDuration;
+
     public SyncMusicMessage() {
     }
 
     public SyncMusicMessage(Long chatId, Long originChatId, Long messageId, Long messageIdTemp, Long originMessageId,
                             Instant sentAt, String fileName, String mimeType, String title, String performer,
                             Integer durationSeconds, Integer coverFileId, Integer coverWidth, Integer coverHeight,
-                            Long audioFileSize) {
+                            Long audioFileSize, Integer fixDuration) {
         this.chatId = chatId;
         this.originChatId = originChatId;
         this.messageId = messageId;
@@ -118,6 +122,7 @@ public class SyncMusicMessage {
         this.coverWidth = coverWidth;
         this.coverHeight = coverHeight;
         this.audioFileSize = audioFileSize;
+        this.fixDuration = fixDuration;
     }
 
     public Long getId() {
@@ -246,5 +251,13 @@ public class SyncMusicMessage {
 
     public void setAudioFileSize(Long audioFileSize) {
         this.audioFileSize = audioFileSize;
+    }
+
+    public Integer getFixDuration() {
+        return fixDuration;
+    }
+
+    public void setFixDuration(Integer fixDuration) {
+        this.fixDuration = fixDuration;
     }
 }
