@@ -218,14 +218,18 @@ public class MusicSyncService {
      * 是否来自目标文件夹中的频道。
      */
     private boolean isFromTargetFolder(TdApi.Message message) {
-        List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
-        if (chats == null || chats.isEmpty()) {
-            return false;
-        }
-        for (TdApi.Chat chat : chats) {
-            if (chat.id == message.chatId) {
-                return true;
+        try {
+            List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
+            if (chats == null || chats.isEmpty()) {
+                return false;
             }
+            for (TdApi.Chat chat : chats) {
+                if (chat.id == message.chatId) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            log.error("isFromTargetFolder: failed", e);
         }
         return false;
     }
@@ -422,9 +426,15 @@ public class MusicSyncService {
 
     public void syncMusicMessages(int count) {
         log.info("syncMusicMessages count={}", count);
-        List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
-        if (chats == null || chats.isEmpty()) {
-            log.error("syncMusicMessages chats is null or empty");
+        List<TdApi.Chat> chats;
+        try {
+            chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
+            if (chats == null || chats.isEmpty()) {
+                log.error("syncMusicMessages chats is null or empty");
+                return;
+            }
+        } catch (Exception e) {
+            log.error("syncMusicMessages error", e);
             return;
         }
 
@@ -612,8 +622,14 @@ public class MusicSyncService {
         }
 
         String newChatTitle = ChannelSyncService.getChatTitleForMusicSource(chat.title);
-        List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
-        if (chats == null || chats.isEmpty()) {
+        List<TdApi.Chat> chats;
+        try {
+            chats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+            if (chats == null || chats.isEmpty()) {
+                return null;
+            }
+        } catch (Exception e) {
+            log.error("queryNewChat: failed", e);
             return null;
         }
 

@@ -18,7 +18,7 @@ public final class ChatFolderCache {
 
     @Nullable
     public static List<TdApi.Chat> queryChats(@NonNull Logger log, @NonNull TelegramClient telegramClient,
-                                              @NonNull String folderName) {
+                                              @NonNull String folderName) throws Exception {
         TdApi.ChatFolder chatFolder = queryChatFolder(telegramClient, folderName);
         if (chatFolder == null) {
             log.warn("No folder with name {} found", folderName);
@@ -47,7 +47,8 @@ public final class ChatFolderCache {
     }
 
     @Nullable
-    public static TdApi.ChatFolder queryChatFolder(@NonNull TelegramClient telegramClient, @Nonnull String folderName) {
+    public static TdApi.ChatFolder queryChatFolder(@NonNull TelegramClient telegramClient, @Nonnull String folderName)
+            throws Exception {
         TdApi.ChatFolderInfo folderInfo = queryChatFolderInfo(folderName);
 
         if (folderInfo == null) {
@@ -55,6 +56,10 @@ public final class ChatFolderCache {
         }
 
         Response<TdApi.ChatFolder> response = telegramClient.send(new TdApi.GetChatFolder(folderInfo.id));
-        return response.getObject().orElse(null);
+        TdApi.Error error = response.getError().orElse(null);
+        if (error != null) {
+            throw new Exception("Error while fetching chat folder: " + error);
+        }
+        return response.getObject().orElseThrow();
     }
 }

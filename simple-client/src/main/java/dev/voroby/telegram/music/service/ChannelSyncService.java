@@ -8,7 +8,6 @@ import dev.voroby.telegram.music.model.SyncChannelInfo;
 import dev.voroby.telegram.music.repository.ChannelInfoRepository;
 import dev.voroby.telegram.music.repository.MusicMessageRepository;
 import dev.voroby.telegram.music.repository.SyncChannelInfoRepository;
-import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import org.drinkless.tdlib.TdApi;
@@ -38,7 +37,6 @@ public class ChannelSyncService {
     private final SyncChannelInfoRepository syncChannelInfoRepository;
     private final MusicMessageRepository musicMessageRepository;
     private final MusicSyncService musicSyncService;
-    private final SyncMusicMessageRepository syncMusicMessageRepository;
 
     /**
      * 需要同步的聊天文件夹名称。
@@ -53,13 +51,12 @@ public class ChannelSyncService {
     public ChannelSyncService(TelegramClient telegramClient,
                               ChannelInfoRepository channelInfoRepository, SyncChannelInfoRepository syncChannelInfoRepository,
                               MusicMessageRepository musicMessageRepository,
-                              MusicSyncService musicSyncService, SyncMusicMessageRepository syncMusicMessageRepository) {
+                              MusicSyncService musicSyncService) {
         this.telegramClient = telegramClient;
         this.channelInfoRepository = channelInfoRepository;
         this.syncChannelInfoRepository = syncChannelInfoRepository;
         this.musicMessageRepository = musicMessageRepository;
         this.musicSyncService = musicSyncService;
-        this.syncMusicMessageRepository = syncMusicMessageRepository;
     }
 
     /**
@@ -75,10 +72,16 @@ public class ChannelSyncService {
             return;
         }
 
-        List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, musicFolderName);
-        if (chats == null || chats.isEmpty()) {
-            // 为了避免误删（例如文件夹信息暂时拿不到），这里不做删除，只记录日志。
-            log.warn("目标文件夹 '{}' 中未找到任何频道，本次频道同步跳过删除逻辑", musicFolderName);
+        List<TdApi.Chat> chats;
+        try {
+            chats = ChatFolderCache.queryChats(log, telegramClient, musicFolderName);
+            if (chats == null || chats.isEmpty()) {
+                // 为了避免误删（例如文件夹信息暂时拿不到），这里不做删除，只记录日志。
+                log.warn("目标文件夹 '{}' 中未找到任何频道，本次频道同步跳过删除逻辑", musicFolderName);
+                return;
+            }
+        } catch (Exception e) {
+            log.error("syncFolderChannels: failed", e);
             return;
         }
 
@@ -104,27 +107,19 @@ public class ChannelSyncService {
             log.error("删除本地中已经不存在的消息失败, remainIds={}", currentChatIds, e);
         }
 
-        List<TdApi.Chat> syncedChats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
-        if (syncedChats == null) {
-            syncedChats = new ArrayList<>();
+        List<TdApi.Chat> syncedChats;
+        try {
+            syncedChats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+            if (syncedChats == null) {
+                syncedChats = new ArrayList<>();
+            }
+        } catch (Exception e) {
+            log.error("syncFolderChannels: failed", e);
+            return;
         }
 
-        Set<Long> currentSyncChannelIds = new HashSet<>();
         for (TdApi.Chat chat : syncedChats) {
-            currentSyncChannelIds.add(chat.id);
             upsertSyncChannel(chat, musicSourceFolderName);
-        }
-
-        try {
-            syncChannelInfoRepository.deleteByFolderNameAndChatIdNotIn(musicSourceFolderName, currentSyncChannelIds);
-        } catch (Exception e) {
-            log.error("删除本地已不存在的频道记录失败sync, folderName={}, remainIds={}", musicSourceFolderName, currentSyncChannelIds, e);
-        }
-
-        try {
-            syncMusicMessageRepository.deleteByChatIdNotIn(currentSyncChannelIds);
-        } catch (Exception e) {
-            log.error("删除本地中已经不存在的消息失败sync, remainIds={}", currentSyncChannelIds, e);
         }
 
         syncMusicSourceChats(chats, syncedChats);
@@ -302,9 +297,15 @@ public class ChannelSyncService {
             return false;
         }
 
-        TdApi.ChatFolder folder = ChatFolderCache.queryChatFolder(telegramClient, folderName);
-        if (folder == null) {
-            log.error("addChatToFolder: folderName={} not found", folderName);
+        TdApi.ChatFolder folder;
+        try {
+            folder = ChatFolderCache.queryChatFolder(telegramClient, folderName);
+            if (folder == null) {
+                log.error("addChatToFolder: folderName={} not found", folderName);
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("addChatToFolder: failed to add chat to folder {}", folderName, e);
             return false;
         }
 
