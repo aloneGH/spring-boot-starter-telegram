@@ -119,7 +119,9 @@ public class ChannelSyncService {
         }
 
         for (TdApi.Chat chat : syncedChats) {
-            upsertSyncChannel(chat, musicSourceFolderName);
+            if (upsertSyncChannel(chat, musicSourceFolderName)) {
+                musicSyncService.syncSrcHistoryForChat(chat);
+            }
         }
 
         syncMusicSourceChats(chats, syncedChats);

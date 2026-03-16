@@ -5,8 +5,10 @@ import dev.voroby.springframework.telegram.client.templates.response.Response;
 import dev.voroby.telegram.message.common.MessageCache;
 import dev.voroby.telegram.music.cache.ChatFolderCache;
 import dev.voroby.telegram.music.model.MusicMessage;
+import dev.voroby.telegram.music.model.SrcMusicMessage;
 import dev.voroby.telegram.music.model.SyncMusicMessage;
 import dev.voroby.telegram.music.repository.MusicMessageRepository;
+import dev.voroby.telegram.music.repository.SrcMusicMessageRepository;
 import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
@@ -51,6 +53,7 @@ public class MusicSyncService {
 
     private final TelegramClient telegramClient;
     private final MusicMessageRepository musicMessageRepository;
+    private final SrcMusicMessageRepository srcMusicMessageRepository;
     private final SyncMusicMessageRepository syncMusicMessageRepository;
     private final AudioConvertService audioConvertService;
 
@@ -66,11 +69,12 @@ public class MusicSyncService {
     private String musicSourceFolderName;
 
     public MusicSyncService(TelegramClient telegramClient,
-                            MusicMessageRepository musicMessageRepository,
+                            MusicMessageRepository musicMessageRepository, SrcMusicMessageRepository srcMusicMessageRepository,
                             SyncMusicMessageRepository syncMusicMessageRepository,
                             AudioConvertService audioConvertService) {
         this.telegramClient = telegramClient;
         this.musicMessageRepository = musicMessageRepository;
+        this.srcMusicMessageRepository = srcMusicMessageRepository;
         this.syncMusicMessageRepository = syncMusicMessageRepository;
         this.audioConvertService = audioConvertService;
     }
@@ -112,6 +116,22 @@ public class MusicSyncService {
 
             for (TdApi.Chat chat : chats) {
                 syncHistoryForChat(chat);
+            }
+            log.info("音乐频道历史消息同步完成");
+        } catch (Exception e) {
+            log.error("音乐频道历史消息同步失败", e);
+        }
+
+        try {
+            log.info("开始执行音乐频道历史消息同步，目标文件夹名称: {}", musicSourceFolderName);
+            List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+            if (chats == null || chats.isEmpty()) {
+                log.warn("目标文件夹 '{}' 中未找到任何频道，历史同步跳过", musicSourceFolderName);
+                return;
+            }
+
+            for (TdApi.Chat chat : chats) {
+                syncSrcHistoryForChat(chat);
             }
             log.info("音乐频道历史消息同步完成");
         } catch (Exception e) {
@@ -178,6 +198,65 @@ public class MusicSyncService {
         log.info("频道 [{}] (id={}) 历史消息同步完成，本次新增 {} 条音乐消息", chat.title, chatId, totalSaved);
     }
 
+    public void syncSrcHistoryForChat(TdApi.Chat chat) {
+        long chatId = chat.id;
+        log.info("开始同步频道 [{}] (id={}) 的历史消息", chat.title, chatId);
+
+        // 先查一下本地该频道已保存的最新一条消息，用于增量同步
+        SrcMusicMessage lastSaved = srcMusicMessageRepository.findTopByChatIdOrderByMessageIdDesc(chatId);
+        Long lastSavedMessageId = lastSaved != null ? lastSaved.getMessageId() : null;
+
+        long fromMessageId = 0; // 0 表示从最新消息开始
+        int totalSaved = 0;
+        boolean reachedExisting = false;
+
+        while (true) {
+            TdApi.GetChatHistory request = new TdApi.GetChatHistory(chatId, fromMessageId, 0, HISTORY_PAGE_LIMIT, false);
+            Response<TdApi.Messages> response = telegramClient.send(request);
+            TdApi.Messages messages = response.getObject().orElse(null);
+            if (messages == null || messages.messages == null || messages.totalCount == 0 || messages.messages.length == 0) {
+                break;
+            }
+
+            List<SrcMusicMessage> toSave = new ArrayList<>();
+
+            for (TdApi.Message message : messages.messages) {
+                // TDLib 返回是按 messageId 递减（从新到旧），一旦遇到 <= 已存在的最大 ID，
+                // 说明后面的都是更旧的历史，可以直接结束该频道的历史同步。
+                if (lastSavedMessageId != null && message.id <= lastSavedMessageId) {
+                    reachedExisting = true;
+                    break;
+                }
+                if (notMusicMessage(message)) {
+                    continue;
+                }
+                if (srcMusicMessageRepository.existsByChatIdAndMessageId(chatId, message.id)) {
+                    continue;
+                }
+                SrcMusicMessage entity = convertToSrcMusicMessage(chatId, message);
+                toSave.add(entity);
+            }
+
+            if (!toSave.isEmpty()) {
+                srcMusicMessageRepository.saveAll(toSave);
+                totalSaved += toSave.size();
+            }
+
+            if (reachedExisting) {
+                break;
+            }
+
+            // 下一轮从当前批次中最旧的那条消息 id 再往前翻
+            long oldestMessageId = messages.messages[messages.messages.length - 1].id;
+            if (oldestMessageId == 0 || oldestMessageId == fromMessageId) {
+                break;
+            }
+            fromMessageId = oldestMessageId;
+        }
+
+        log.info("频道 [{}] (id={}) 历史消息同步完成，本次新增 {} 条音乐消息", chat.title, chatId, totalSaved);
+    }
+
     /**
      * 定时消费实时新消息队列并写入 SQLite。
      * 与 message.service.print.scheduler.Scheduler 的机制类似。
@@ -196,18 +275,21 @@ public class MusicSyncService {
             }
 
             try {
-                if (!isFromTargetFolder(message)) {
-                    continue;
-                }
                 if (notMusicMessage(message)) {
                     continue;
                 }
-                if (musicMessageRepository.existsByChatIdAndMessageId(message.chatId, message.id)) {
-                    continue;
+
+                if (isFromTargetFolder(message, folderName)
+                        && !musicMessageRepository.existsByChatIdAndMessageId(message.chatId, message.id)) {
+                    MusicMessage entity = convertToEntity(message.chatId, message);
+                    musicMessageRepository.save(entity);
                 }
 
-                MusicMessage entity = convertToEntity(message.chatId, message);
-                musicMessageRepository.save(entity);
+                if (isFromTargetFolder(message, musicSourceFolderName)
+                        && !srcMusicMessageRepository.existsByChatIdAndMessageId(message.chatId, message.id)) {
+                    SrcMusicMessage item = convertToSrcMusicMessage(message.chatId, message);
+                    srcMusicMessageRepository.save(item);
+                }
             } catch (Exception e) {
                 log.error("实时同步音乐消息失败, chatId={}, messageId={}", message.chatId, message.id, e);
             }
@@ -217,9 +299,9 @@ public class MusicSyncService {
     /**
      * 是否来自目标文件夹中的频道。
      */
-    private boolean isFromTargetFolder(TdApi.Message message) {
+    private boolean isFromTargetFolder(TdApi.Message message, @Nonnull String targetFolder) {
         try {
-            List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
+            List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, targetFolder);
             if (chats == null || chats.isEmpty()) {
                 return false;
             }
@@ -244,6 +326,11 @@ public class MusicSyncService {
         if (content instanceof TdApi.MessageAudio) {
             return false;
         }
+
+        if (content instanceof TdApi.MessageVoiceNote) {
+            return false;
+        }
+
         if (content instanceof TdApi.MessageDocument md && md.document != null) {
             String mimeType = md.document.mimeType;
             if (mimeType == null) {
@@ -251,6 +338,7 @@ public class MusicSyncService {
             }
             return !mimeType.startsWith("audio/") && !mimeType.contains("mpeg") && !mimeType.contains("ogg");
         }
+
         return true;
     }
 
@@ -326,6 +414,93 @@ public class MusicSyncService {
                 audioFileSize,
                 0
         );
+    }
+
+    private SrcMusicMessage convertToSrcMusicMessage(long chatId, TdApi.Message message) {
+        TdApi.MessageContent content = message.content;
+
+        String fileName = null;
+        String mimeType = null;
+        String title = null;
+        String performer = null;
+        Integer durationSeconds = null;
+        Integer coverFileId = null;
+        Integer coverWidth = null;
+        Integer coverHeight = null;
+        Integer audioFileId = null;
+        Long audioFileSize = null;
+
+        if (content instanceof TdApi.MessageAudio ma && ma.audio != null) {
+            TdApi.Audio audio = ma.audio;
+            mimeType = audio.mimeType;
+            durationSeconds = audio.duration;
+            title = audio.title;
+            performer = audio.performer;
+            if (audio.fileName != null && !audio.fileName.isEmpty()) {
+                fileName = audio.fileName;
+            }
+            if (audio.audio != null) {
+                audioFileId = audio.audio.id;
+                audioFileSize = audio.audio.size;
+            }
+            TdApi.Thumbnail thumb = audio.albumCoverThumbnail;
+            if (thumb == null && audio.externalAlbumCovers != null && audio.externalAlbumCovers.length > 0) {
+                thumb = audio.externalAlbumCovers[0];
+            }
+            if (thumb != null && thumb.file != null) {
+                coverFileId = thumb.file.id;
+                coverWidth = thumb.width;
+                coverHeight = thumb.height;
+            }
+        } else if (content instanceof TdApi.MessageDocument md && md.document != null) {
+            TdApi.Document doc = md.document;
+            mimeType = doc.mimeType;
+            if (doc.fileName != null && !doc.fileName.isEmpty()) {
+                fileName = doc.fileName;
+            }
+            if (doc.document != null) {
+                audioFileId = doc.document.id;
+                audioFileSize = doc.document.size;
+            }
+            TdApi.Thumbnail thumb = doc.thumbnail;
+            if (thumb != null && thumb.file != null) {
+                coverFileId = thumb.file.id;
+                coverWidth = thumb.width;
+                coverHeight = thumb.height;
+            }
+        } else if (content instanceof TdApi.MessageVoiceNote mv && mv.voiceNote != null) {
+            TdApi.VoiceNote note = mv.voiceNote;
+            mimeType = note.mimeType;
+            durationSeconds = note.duration;
+            if (note.voice != null) {
+                audioFileSize = note.voice.size;
+            }
+
+            String[] split = mv.caption.text.split("-");
+            if (split.length == 2) {
+                title = split[0];
+                performer = split[1];
+            } else if (split.length == 1) {
+                title = split[0];
+            }
+        }
+
+        Instant sentAt = Instant.ofEpochSecond(message.date);
+
+        return new SrcMusicMessage(chatId,
+                message.id,
+                sentAt,
+                fileName,
+                mimeType,
+                title,
+                performer,
+                durationSeconds,
+                coverFileId,
+                coverWidth,
+                coverHeight,
+                audioFileId,
+                audioFileSize,
+                1);
     }
 
     @Nullable

@@ -2,9 +2,9 @@ package dev.voroby.telegram.music.service;
 
 import dev.voroby.telegram.music.dto.FolderItem;
 import dev.voroby.telegram.music.dto.MusicItem;
-import dev.voroby.telegram.music.model.SyncMusicMessage;
+import dev.voroby.telegram.music.model.SrcMusicMessage;
+import dev.voroby.telegram.music.repository.SrcMusicMessageRepository;
 import dev.voroby.telegram.music.repository.SyncChannelInfoRepository;
-import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import org.apache.commons.io.FilenameUtils;
 import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
@@ -29,16 +29,16 @@ import java.util.stream.Collectors;
 public class MusicStreamService {
     private static final Logger log = LoggerFactory.getLogger(MusicStreamService.class);
 
-    private final SyncMusicMessageRepository syncMusicMessageRepository;
+    private final SrcMusicMessageRepository srcMusicMessageRepository;
 
     private final SyncChannelInfoRepository syncChannelInfoRepository;
 
     private final MusicSyncService musicSyncService;
 
-    public MusicStreamService(SyncMusicMessageRepository syncMusicMessageRepository,
+    public MusicStreamService(SrcMusicMessageRepository srcMusicMessageRepository,
                               SyncChannelInfoRepository syncChannelInfoRepository, MusicSyncService musicSyncService) {
         // 假设这是你封装的 TDLib 客户端
-        this.syncMusicMessageRepository = syncMusicMessageRepository;
+        this.srcMusicMessageRepository = srcMusicMessageRepository;
         this.syncChannelInfoRepository = syncChannelInfoRepository;
         this.musicSyncService = musicSyncService;
     }
@@ -52,8 +52,9 @@ public class MusicStreamService {
 
     @GetMapping("/folder/{fid}")
     public List<MusicItem> musicList(@PathVariable(name = "fid") long chatId) {
-        return syncMusicMessageRepository.findAllByChatId(chatId).stream()
-                .filter(it -> it.getChatId() != -1 && it.getMessageId() != -1)
+        return srcMusicMessageRepository.findAllByChatId(chatId).stream()
+                .filter(it -> it.getChatId() != -1 && it.getMessageId() != -1
+                        && StringUtils.hasText(it.getTitle()))
                 .map(it -> {
                     String title = StringUtils.hasText(it.getTitle()) ? it.getTitle()
                             : FilenameUtils.getBaseName(it.getFileName()).trim();
@@ -76,8 +77,8 @@ public class MusicStreamService {
         }
         final long finalStart = start;
 
-        List<SyncMusicMessage> result = syncMusicMessageRepository.findByChatIdAndMessageId(chatId, msgId);
-        SyncMusicMessage musicMessage = result == null || result.isEmpty() ? null : result.get(0);
+        List<SrcMusicMessage> result = srcMusicMessageRepository.findByChatIdAndMessageId(chatId, msgId);
+        SrcMusicMessage musicMessage = result == null || result.isEmpty() ? null : result.get(0);
         if (musicMessage == null) {
             log.warn("no music message found for {}", msgId);
             return ResponseEntity.notFound().build();
