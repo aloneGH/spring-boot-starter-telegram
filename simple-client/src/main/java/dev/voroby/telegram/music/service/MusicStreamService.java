@@ -9,20 +9,23 @@ import org.apache.commons.io.FilenameUtils;
 import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.util.UriUtils;
 
 import java.io.File;
-import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import static dev.voroby.telegram.music.service.MusicSyncService.downloadFutures;
 
 @RestController("musicStreamService")
 @RequestMapping("/music")
@@ -64,18 +67,9 @@ public class MusicStreamService {
     }
 
     @GetMapping("/stream/{msgId}")
-    public ResponseEntity<StreamingResponseBody> streamMusic(
-            @RequestHeader(name = "Range", required = false) String range,
+    public ResponseEntity<Resource> streamMusic(
             @PathVariable long msgId,
-            @RequestParam(name = "fid") long chatId,
-            @RequestParam(name = "size", defaultValue = "-1") long size) {
-
-        long start = 0;
-        if (range != null) {
-            // 简单解析 Range: bytes=1000-
-            start = Long.parseLong(range.replace("bytes=", "").split("-")[0]);
-        }
-        final long finalStart = start;
+            @RequestParam(name = "fid") long chatId) {
 
         List<SrcMusicMessage> result = srcMusicMessageRepository.findByChatIdAndMessageId(chatId, msgId);
         SrcMusicMessage musicMessage = result == null || result.isEmpty() ? null : result.get(0);
@@ -89,87 +83,34 @@ public class MusicStreamService {
             return ResponseEntity.notFound().build();
         }
 
-        long itemSize = tdFile.size == 0 ? musicMessage.getAudioFileSize() : tdFile.size;
-        final long reqSize = size < 0 ? itemSize - start : size;
-        if (start < 0 || reqSize > itemSize || start >= itemSize) {
-            log.warn("invalid size: {} - {} -> {}", start, reqSize, itemSize);
-            return ResponseEntity.badRequest().build();
+        if (!tdFile.local.isDownloadingCompleted || !new File(tdFile.local.path).exists()) {
+            CompletableFuture<TdApi.File> future = new CompletableFuture<>();
+            downloadFutures.put(tdFile.id, future);
+
+            try {
+                tdFile = future.get(30L, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.warn("couldn't download music file -> {}", tdFile.local.path, e);
+                return ResponseEntity.notFound().build();
+            }
         }
 
-        if (reqSize > (itemSize - start)) {
-            log.warn("invalid range: {} - {} -> {}", start, reqSize, itemSize);
-            return ResponseEntity.badRequest().build();
-        }
-
+        String filePath = tdFile.local.path;
         String encodedFileName = UriUtils.encode(musicMessage.getFileName(), StandardCharsets.UTF_8.toString());
-        return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + encodedFileName + "\"; filename*=UTF-8''" + encodedFileName)
-                .header(HttpHeaders.CONTENT_TYPE, musicMessage.getMimeType()) // 明确指定视频格式
-                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(reqSize))
-                .header(HttpHeaders.ACCEPT_RANGES, "bytes")
-                .header(HttpHeaders.CONTENT_RANGE, "bytes " + finalStart + "-" + (finalStart + (reqSize - 1)) + "/" + itemSize)
-                .body(outputStream -> {
-                    String filePath = tdFile.local.path;
-                    int maxRetries = 60;
-                    int retryInterval = 1000;
-                    int cnt = 0;
+        try {
+            FileSystemResource resource = new FileSystemResource(filePath);
+            if (resource.exists()) {
+                return ResponseEntity.ok()
+                        .contentType(MediaType.parseMediaType(musicMessage.getMimeType()))
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + encodedFileName
+                                + "\"; filename*=UTF-8''" + encodedFileName)
+                        .body(resource);
+            }
+        } catch (Exception e) {
+            log.warn("couldn't stream music file -> {}", filePath, e);
+        }
 
-                    long offset = finalStart;
-                    long remaining = reqSize - offset;
-
-                    byte[] buffer = new byte[4096];
-                    int bytesRead;
-
-                    while (cnt++ < maxRetries) {
-                        if (ObjectUtils.isEmpty(filePath)) {
-                            try {
-                                Thread.sleep(retryInterval);
-                            } catch (InterruptedException e) {
-                                log.warn("interrupted while waiting for file to be downloaded");
-                            }
-
-                            TdApi.File fileTd = musicSyncService.queryFile(tdFile.id);
-                            filePath = fileTd == null ? null : fileTd.local.path;
-                            continue;
-                        }
-
-                        File file = new File(filePath);
-                        if (!file.exists()) {
-                            try {
-                                Thread.sleep(retryInterval);
-                            } catch (InterruptedException e) {
-                                log.warn("interrupted while waiting for {}", filePath, e);
-                            }
-
-                            TdApi.File fileTd = musicSyncService.queryFile(tdFile.id);
-                            filePath = fileTd == null ? null : fileTd.local.path;
-                            continue;
-                        }
-
-                        try (RandomAccessFile fp = new RandomAccessFile(filePath, "r")) {
-                            if (offset + remaining > fp.length()) {
-                                Thread.sleep(retryInterval);
-                                continue;
-                            }
-
-                            fp.seek(offset);
-                            while ((bytesRead = fp.read(buffer, 0, buffer.length)) > 0) {
-                                outputStream.write(buffer, 0, bytesRead);
-                                offset += bytesRead;
-                                remaining -= bytesRead;
-                            }
-
-                            if (remaining <= 0) {
-                                break;
-                            }
-                        } catch (Exception e) {
-                            log.error("read file failed: {}", filePath, e);
-                            break;
-                        }
-                    }
-
-                    outputStream.flush();
-                });
+        return ResponseEntity.notFound().build();
     }
 
     @GetMapping("/sync")
