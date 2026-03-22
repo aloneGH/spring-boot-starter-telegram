@@ -45,9 +45,9 @@ public class LyricSyncService {
         this.syncMusicMessageRepository = syncMusicMessageRepository;
     }
 
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 300_000)
     public void syncMusicLyrics() {
-        syncMusicLyrics(12);
+        syncMusicLyrics(120);
     }
 
     public void syncMusicLyrics(int count) {
