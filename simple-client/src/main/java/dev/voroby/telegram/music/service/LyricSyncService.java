@@ -26,6 +26,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * 通过歌曲名获取网易云原文+翻译歌词(网易云api)
+ * https://www.showby.top/archives/624
+ */
 @Service
 public class LyricSyncService {
     private static final Logger log = LoggerFactory.getLogger(LyricSyncService.class);
