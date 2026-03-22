@@ -2,6 +2,7 @@ package dev.voroby.telegram.music.service;
 
 import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
+import dev.voroby.telegram.Constant;
 import dev.voroby.telegram.music.cache.ChatFolderCache;
 import dev.voroby.telegram.music.model.ChannelInfo;
 import dev.voroby.telegram.music.model.SyncChannelInfo;
@@ -67,6 +68,11 @@ public class ChannelSyncService {
      */
     @Scheduled(fixedDelay = 300_000)
     public synchronized void syncFolderChannels() {
+        if (Constant.LOCAL_DEBUG) {
+            log.warn("ignored in debug");
+            return;
+        }
+
         // 如果文件夹信息还没准备好，直接跳过
         if (ChatFolderCache.chatFolders.isEmpty()) {
             return;

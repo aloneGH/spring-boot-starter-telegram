@@ -1,6 +1,8 @@
 package dev.voroby.telegram.music.dto;
 
-public class MusicItem {
+import java.io.Serializable;
+
+public class MusicItem implements Serializable {
     private long folderId;
 
     private long musicId;

@@ -2,6 +2,7 @@ package dev.voroby.telegram.music.service;
 
 import dev.voroby.springframework.telegram.client.TelegramClient;
 import dev.voroby.springframework.telegram.client.templates.response.Response;
+import dev.voroby.telegram.Constant;
 import dev.voroby.telegram.message.common.MessageCache;
 import dev.voroby.telegram.music.cache.ChatFolderCache;
 import dev.voroby.telegram.music.model.MusicMessage;
@@ -106,6 +107,11 @@ public class MusicSyncService {
     @Async
     @EventListener(ApplicationReadyEvent.class)
     public void syncHistoryOnStartup() {
+        if (Constant.LOCAL_DEBUG) {
+            log.warn("ignored in debug");
+            return;
+        }
+
         try {
             log.info("开始执行音乐频道历史消息同步，目标文件夹名称: {}", folderName);
             List<TdApi.Chat> chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
@@ -263,6 +269,11 @@ public class MusicSyncService {
      */
     @Scheduled(fixedDelay = 60_000)
     public void syncRealtimeMessages() {
+        if (Constant.LOCAL_DEBUG) {
+            log.warn("ignored in debug");
+            return;
+        }
+
         // 如果文件夹信息还没准备好，直接跳过
         if (ChatFolderCache.chatFolders.isEmpty()) {
             return;
@@ -601,6 +612,11 @@ public class MusicSyncService {
 
     public void syncMusicMessages(int count) {
         log.info("syncMusicMessages count={}", count);
+        if (Constant.LOCAL_DEBUG) {
+            log.warn("ignored in debug");
+            return;
+        }
+
         List<TdApi.Chat> chats;
         try {
             chats = ChatFolderCache.queryChats(log, telegramClient, folderName);
@@ -824,6 +840,11 @@ public class MusicSyncService {
 
     public void fixMusicDuration(int count) {
         log.info("fixMusicDuration: {}", count);
+        if (Constant.LOCAL_DEBUG) {
+            log.warn("ignored in debug");
+            return;
+        }
+
         List<SyncMusicMessage> data = syncMusicMessageRepository.findByFixDurationIsNullOrFixDurationLessThan(
                 0, Limit.of(count)
         );

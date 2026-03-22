@@ -2,13 +2,16 @@ package dev.voroby.telegram.music.service;
 
 import dev.voroby.telegram.music.dto.FolderItem;
 import dev.voroby.telegram.music.dto.MusicItem;
+import dev.voroby.telegram.music.model.MusicLyric;
 import dev.voroby.telegram.music.model.SrcMusicMessage;
+import dev.voroby.telegram.music.repository.MusicLyricRepository;
 import dev.voroby.telegram.music.repository.SrcMusicMessageRepository;
 import dev.voroby.telegram.music.repository.SyncChannelInfoRepository;
 import org.apache.commons.io.FilenameUtils;
 import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -37,13 +40,15 @@ public class MusicStreamService {
     private final SyncChannelInfoRepository syncChannelInfoRepository;
 
     private final MusicSyncService musicSyncService;
+    private final MusicLyricRepository musicLyricRepository;
 
     public MusicStreamService(SrcMusicMessageRepository srcMusicMessageRepository,
-                              SyncChannelInfoRepository syncChannelInfoRepository, MusicSyncService musicSyncService) {
+                              SyncChannelInfoRepository syncChannelInfoRepository, MusicSyncService musicSyncService, MusicLyricRepository musicLyricRepository) {
         // 假设这是你封装的 TDLib 客户端
         this.srcMusicMessageRepository = srcMusicMessageRepository;
         this.syncChannelInfoRepository = syncChannelInfoRepository;
         this.musicSyncService = musicSyncService;
+        this.musicLyricRepository = musicLyricRepository;
     }
 
     @GetMapping("/folders")
@@ -53,6 +58,7 @@ public class MusicStreamService {
                 .collect(Collectors.toList());
     }
 
+    @Cacheable(key = "#chatId", value = "music_list")
     @GetMapping("/folder/{fid}")
     public List<MusicItem> musicList(@PathVariable(name = "fid") long chatId) {
         return srcMusicMessageRepository.findAllByChatId(chatId).stream()
@@ -113,9 +119,17 @@ public class MusicStreamService {
         return ResponseEntity.notFound().build();
     }
 
-    @GetMapping("/sync")
-    public ResponseEntity<Object> syncMusicMessage(@RequestParam(name = "cnt", defaultValue = "10") int count) {
-        musicSyncService.syncMusicMessages(count);
-        return ResponseEntity.ok().build();
+    @GetMapping("/lyric/{msgId}")
+    public ResponseEntity<String> getLyric(
+            @PathVariable long msgId,
+            @RequestParam(name = "fid") long chatId) {
+        List<MusicLyric> data = musicLyricRepository.findByChatIdAndMessageId(chatId, msgId);
+        MusicLyric item = data.isEmpty() ? null : data.get(0);
+        if (item == null) {
+            log.warn("no music lyric found for {}", msgId);
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok().body(item.getLyric());
     }
 }

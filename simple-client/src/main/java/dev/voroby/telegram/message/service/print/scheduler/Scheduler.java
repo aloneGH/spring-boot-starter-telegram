@@ -14,14 +14,12 @@ public class Scheduler {
         this.printService = printService;
     }
 
-    //    @Scheduled(fixedDelay = 1000)
     private void launch() {
         for (int i = 0; i < 100; i++) {
             TdApi.Message message = MessageCache.newMessagesQueue.pollFirst();
             if (message == null) {
                 break;
             }
-            // TODO
 //            printService.print(message);
         }
     }
