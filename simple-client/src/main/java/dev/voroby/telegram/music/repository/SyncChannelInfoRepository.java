@@ -2,6 +2,8 @@ package dev.voroby.telegram.music.repository;
 
 import dev.voroby.telegram.music.model.SyncChannelInfo;
 import jakarta.transaction.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Repository;
@@ -15,4 +17,6 @@ public interface SyncChannelInfoRepository extends JpaRepository<SyncChannelInfo
     @Modifying
     @Transactional
     void deleteByFolderNameAndChatIdNotIn(String folderName, Collection<Long> chatIds);
+
+    Page<SyncChannelInfo> findByTitleContainsIgnoreCase(String title, Pageable pageable);
 }

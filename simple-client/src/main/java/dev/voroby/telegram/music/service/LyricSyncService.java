@@ -3,8 +3,9 @@ package dev.voroby.telegram.music.service;
 import com.google.gson.Gson;
 import dev.voroby.telegram.Constant;
 import dev.voroby.telegram.music.model.MusicLyric;
-import dev.voroby.telegram.music.model.SyncMusicMessage;
+import dev.voroby.telegram.music.model.SrcMusicMessage;
 import dev.voroby.telegram.music.repository.MusicLyricRepository;
+import dev.voroby.telegram.music.repository.SrcMusicMessageRepository;
 import dev.voroby.telegram.music.repository.SyncMusicMessageRepository;
 import dev.voroby.telegram.music.service.netease.LyricResponse;
 import dev.voroby.telegram.music.service.netease.SearchMusicResult;
@@ -39,10 +40,12 @@ public class LyricSyncService {
 
     private final MusicLyricRepository musicLyricRepository;
     private final SyncMusicMessageRepository syncMusicMessageRepository;
+    private final SrcMusicMessageRepository srcMusicMessageRepository;
 
-    public LyricSyncService(MusicLyricRepository musicLyricRepository, SyncMusicMessageRepository syncMusicMessageRepository) {
+    public LyricSyncService(MusicLyricRepository musicLyricRepository, SyncMusicMessageRepository syncMusicMessageRepository, SrcMusicMessageRepository srcMusicMessageRepository) {
         this.musicLyricRepository = musicLyricRepository;
         this.syncMusicMessageRepository = syncMusicMessageRepository;
+        this.srcMusicMessageRepository = srcMusicMessageRepository;
     }
 
     @Scheduled(fixedDelay = 300_000)
@@ -57,7 +60,7 @@ public class LyricSyncService {
             return;
         }
 
-        List<SyncMusicMessage> data = getMusicMessagesWithoutLyrics(count);
+        List<SrcMusicMessage> data = getMusicMessagesWithoutLyrics(count);
         if (data.isEmpty()) {
             log.info("no music need to sync lyrics");
             return;
@@ -93,14 +96,14 @@ public class LyricSyncService {
     }
 
     @Nonnull
-    private List<SyncMusicMessage> getMusicMessagesWithoutLyrics(int count) {
-        List<SyncMusicMessage> messages = new ArrayList<>();
+    private List<SrcMusicMessage> getMusicMessagesWithoutLyrics(int count) {
+        List<SrcMusicMessage> messages = new ArrayList<>();
 
         int pageIdx = 0;
-        Page<SyncMusicMessage> page;
+        Page<SrcMusicMessage> page;
         do {
             PageRequest pageRequest = PageRequest.of(pageIdx, count);
-            page = syncMusicMessageRepository.findAll(pageRequest);
+            page = srcMusicMessageRepository.findAll(pageRequest);
             page.forEach(it -> {
                 boolean exists = musicLyricRepository.existsByChatIdAndMessageIdAndSync(it.getChatId(), it.getMessageId(), 1);
                 if (!exists) {
@@ -125,7 +128,7 @@ public class LyricSyncService {
     }
 
     @Nullable
-    private String getLyric(@Nonnull String keyword) {
+    public String getLyric(@Nonnull String keyword) {
         log.info("Searching for music Lyric with keyword={}", keyword);
         String lyric = null;
 

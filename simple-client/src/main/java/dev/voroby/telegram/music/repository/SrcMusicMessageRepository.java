@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
@@ -36,7 +37,7 @@ public interface SrcMusicMessageRepository extends JpaRepository<SrcMusicMessage
     @Transactional
     void deleteByChatIdNotIn(Collection<Long> chatIds);
 
-    List<SrcMusicMessage> findAllByChatId(Long chatId);
+    Page<SrcMusicMessage> findAllByChatId(Long chatId, Pageable pageable);
 
     Page<SrcMusicMessage> findByChatId(Long chatId, Pageable pageable);
 
@@ -48,5 +49,14 @@ public interface SrcMusicMessageRepository extends JpaRepository<SrcMusicMessage
     Page<SrcMusicMessage> findByChatIdAndSyncLessThan(long chatId, int sync, Pageable pageable);
 
     Page<SrcMusicMessage> findByChatIdAndSyncIsNullOrSyncLessThan(Long chatId, Integer sync, Pageable pageable);
+
+    Page<SrcMusicMessage> findByTitleContainsIgnoreCase(String title, Pageable pageable);
+
+    @Query("SELECT DISTINCT m FROM SrcMusicMessage m WHERE m.performer LIKE %:kw% group by m.performer")
+    Page<SrcMusicMessage> findPerformers(@Param("kw") String query, Pageable pageable);
+
+    Page<SrcMusicMessage> findByPerformerContainingIgnoreCase(String performer, Pageable pageable);
+
+    Page<SrcMusicMessage> findByPerformer(String performer, Pageable pageable);
 }
 
