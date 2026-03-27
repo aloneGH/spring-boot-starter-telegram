@@ -36,6 +36,7 @@ public class MusicSearchService {
             return response;
         }
 
+        query = StringUtils.trimToEmpty(query);
         pn = Math.max(pn - 1, 0);
         int ps = 10;
         PageRequest pageRequest = PageRequest.of(pn, ps);
@@ -65,6 +66,7 @@ public class MusicSearchService {
             return response;
         }
 
+        query = StringUtils.trimToEmpty(query);
         pn = Math.max(pn - 1, 0);
         int ps = 10;
         PageRequest pageRequest = PageRequest.of(pn, ps);
