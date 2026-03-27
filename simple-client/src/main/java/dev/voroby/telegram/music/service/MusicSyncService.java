@@ -33,6 +33,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -914,5 +915,66 @@ public class MusicSyncService {
         }
 
         log.info("fixMusicDuration: cnt = {}", success[0]);
+    }
+
+    @Async
+    @EventListener(ApplicationReadyEvent.class)
+    public void cleanupDupSrcMusicMessages() {
+        log.info("cleanupDupSrcMusicMessages");
+        List<SrcMusicMessage> allData = srcMusicMessageRepository.findAll();
+        List<SrcMusicMessage> duplicates = new ArrayList<>();
+
+        Map<String, SrcMusicMessage> titles = new HashMap<>();
+        Map<String, SrcMusicMessage> performers = new HashMap<>();
+
+        for (SrcMusicMessage item : allData) {
+            String title = item.getTitle();
+            String performer = item.getPerformer();
+
+            if (!StringUtils.hasText(title) && !StringUtils.hasText(performer)) {
+                duplicates.add(item);
+                continue;
+            }
+
+            if (titles.containsKey(title) && performers.containsKey(performer)) {
+                SrcMusicMessage exists = titles.get(title);
+                String filenameOld = exists == null ? null : exists.getFileName();
+                if (!StringUtils.hasText(filenameOld) && StringUtils.hasText(item.getFileName())) {
+                    titles.put(title, item);
+                    duplicates.add(exists);
+                } else {
+                    duplicates.add(item);
+                }
+                continue;
+            }
+
+            titles.put(title, item);
+            performers.put(performer, item);
+        }
+
+        log.info("cleanupDupSrcMusicMessages: duplicates = {}", duplicates.size());
+        Map<Long, List<SrcMusicMessage>> duplicatesMap = new HashMap<>();
+        for (SrcMusicMessage item : duplicates) {
+            long chatId = item.getChatId();
+            duplicatesMap.computeIfAbsent(chatId, k -> new ArrayList<>()).add(item);
+        }
+
+        for (Map.Entry<Long, List<SrcMusicMessage>> entry : duplicatesMap.entrySet()) {
+            long chatId = entry.getKey();
+            long[] messageIds = entry.getValue().stream().mapToLong(SrcMusicMessage::getMessageId).toArray();
+            TdApi.DeleteMessages request = new TdApi.DeleteMessages(chatId, messageIds, true);
+            Response<TdApi.Ok> response = telegramClient.send(request);
+            TdApi.Error error = response.getError().orElse(null);
+            if (error != null) {
+                log.error("cleanupDupSrcMusicMessages: failed, chatid = {}, size = {}, error = {}", chatId,
+                        messageIds.length, error);
+            } else {
+                log.info("cleanupDupSrcMusicMessages: success, chatId = {}, size = {}", chatId, messageIds.length);
+            }
+        }
+
+        List<Long> ids = duplicates.stream().map(SrcMusicMessage::getId).toList();
+        srcMusicMessageRepository.deleteAllByIdsCustom(ids);
+        log.info("cleanupDupSrcMusicMessages: all done, ids = {}", ids.size());
     }
 }

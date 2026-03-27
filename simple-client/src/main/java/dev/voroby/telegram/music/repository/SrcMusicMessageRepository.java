@@ -58,5 +58,10 @@ public interface SrcMusicMessageRepository extends JpaRepository<SrcMusicMessage
     Page<SrcMusicMessage> findByPerformerContainingIgnoreCase(String performer, Pageable pageable);
 
     Page<SrcMusicMessage> findByPerformer(String performer, Pageable pageable);
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM SrcMusicMessage m WHERE m.id IN :ids")
+    void deleteAllByIdsCustom(@Param("ids") List<Long> ids);
 }
 
