@@ -16,7 +16,7 @@ public class Scheduler {
 
     private void launch() {
         for (int i = 0; i < 100; i++) {
-            TdApi.Message message = MessageCache.newMessagesQueue.pollFirst();
+            TdApi.Message message = MessageCache.newMessagesQueue.poll();
             if (message == null) {
                 break;
             }

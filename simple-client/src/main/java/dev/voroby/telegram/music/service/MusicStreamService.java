@@ -64,7 +64,7 @@ public class MusicStreamService {
                 .collect(Collectors.toList());
     }
 
-    @Cacheable(key = "#chatId", value = "music_list")
+    @Cacheable(value = "music_list")
     @GetMapping("/folder/{fid}")
     public MediaResponse<MusicItem> musicList(@PathVariable(name = "fid") long chatId,
                                               @RequestParam(name = "pn", defaultValue = "1") int pn) {
@@ -119,7 +119,13 @@ public class MusicStreamService {
             return ResponseEntity.notFound().build();
         }
 
-        TdApi.File tdFile = musicSyncService.downloadFile(chatId, msgId);
+        TdApi.File tdFile = null;
+        try {
+            tdFile = musicSyncService.downloadFile(chatId, msgId);
+        } catch (Exception e) {
+            log.warn("could not download music file {}", msgId, e);
+        }
+
         if (tdFile == null) {
             return ResponseEntity.notFound().build();
         }

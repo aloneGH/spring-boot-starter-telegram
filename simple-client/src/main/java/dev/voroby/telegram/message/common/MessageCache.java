@@ -2,10 +2,9 @@ package dev.voroby.telegram.message.common;
 
 import org.drinkless.tdlib.TdApi;
 
-import java.util.Deque;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ArrayBlockingQueue;
 
 public final class MessageCache {
 
-    public static final Deque<TdApi.Message> newMessagesQueue = new ConcurrentLinkedDeque<>();
+    public static final ArrayBlockingQueue<TdApi.Message> newMessagesQueue = new ArrayBlockingQueue<>(512);
 }

@@ -15,6 +15,7 @@ import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -49,15 +50,18 @@ public class ChannelSyncService {
     @Value("${music.sync.MusicSource:Music-Source}")
     private String musicSourceFolderName;
 
+    private final ApplicationContext applicationContext;
+
     public ChannelSyncService(TelegramClient telegramClient,
                               ChannelInfoRepository channelInfoRepository, SyncChannelInfoRepository syncChannelInfoRepository,
                               MusicMessageRepository musicMessageRepository,
-                              MusicSyncService musicSyncService) {
+                              MusicSyncService musicSyncService, ApplicationContext applicationContext) {
         this.telegramClient = telegramClient;
         this.channelInfoRepository = channelInfoRepository;
         this.syncChannelInfoRepository = syncChannelInfoRepository;
         this.musicMessageRepository = musicMessageRepository;
         this.musicSyncService = musicSyncService;
+        this.applicationContext = applicationContext;
     }
 
     /**
@@ -80,7 +84,7 @@ public class ChannelSyncService {
 
         List<TdApi.Chat> chats;
         try {
-            chats = ChatFolderCache.queryChats(log, telegramClient, musicFolderName);
+            chats = ChatFolderCache.queryChats(log, telegramClient, musicFolderName, applicationContext);
             if (chats == null || chats.isEmpty()) {
                 // 为了避免误删（例如文件夹信息暂时拿不到），这里不做删除，只记录日志。
                 log.warn("目标文件夹 '{}' 中未找到任何频道，本次频道同步跳过删除逻辑", musicFolderName);
@@ -115,7 +119,7 @@ public class ChannelSyncService {
 
         List<TdApi.Chat> syncedChats;
         try {
-            syncedChats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName);
+            syncedChats = ChatFolderCache.queryChats(log, telegramClient, musicSourceFolderName, applicationContext);
             if (syncedChats == null) {
                 syncedChats = new ArrayList<>();
             }
@@ -307,7 +311,7 @@ public class ChannelSyncService {
 
         TdApi.ChatFolder folder;
         try {
-            folder = ChatFolderCache.queryChatFolder(telegramClient, folderName);
+            folder = ChatFolderCache.queryChatFolder(telegramClient, folderName, applicationContext, log);
             if (folder == null) {
                 log.error("addChatToFolder: folderName={} not found", folderName);
                 return false;

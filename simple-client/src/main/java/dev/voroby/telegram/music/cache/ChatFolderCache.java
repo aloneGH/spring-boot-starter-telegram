@@ -7,6 +7,8 @@ import jakarta.annotation.Nullable;
 import org.drinkless.tdlib.TdApi;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,10 +18,12 @@ import java.util.List;
 public final class ChatFolderCache {
     public static final List<TdApi.ChatFolderInfo> chatFolders = Collections.synchronizedList(new ArrayList<>());
 
+    private static int sTdLibTimeoutCount = 0;
+
     @Nullable
     public static List<TdApi.Chat> queryChats(@NonNull Logger log, @NonNull TelegramClient telegramClient,
-                                              @NonNull String folderName) throws Exception {
-        TdApi.ChatFolder chatFolder = queryChatFolder(telegramClient, folderName);
+                                              @NonNull String folderName, ApplicationContext applicationContext) throws Exception {
+        TdApi.ChatFolder chatFolder = queryChatFolder(telegramClient, folderName, applicationContext, log);
         if (chatFolder == null) {
             log.warn("No folder with name {} found", folderName);
             return null;
@@ -47,7 +51,8 @@ public final class ChatFolderCache {
     }
 
     @Nullable
-    public static TdApi.ChatFolder queryChatFolder(@NonNull TelegramClient telegramClient, @Nonnull String folderName)
+    public static TdApi.ChatFolder queryChatFolder(@NonNull TelegramClient telegramClient, @Nonnull String folderName,
+                                                   ApplicationContext applicationContext, @NonNull Logger log)
             throws Exception {
         TdApi.ChatFolderInfo folderInfo = queryChatFolderInfo(folderName);
 
@@ -58,6 +63,12 @@ public final class ChatFolderCache {
         Response<TdApi.ChatFolder> response = telegramClient.send(new TdApi.GetChatFolder(folderInfo.id));
         TdApi.Error error = response.getError().orElse(null);
         if (error != null) {
+            sTdLibTimeoutCount += error.message.contains("TDLib request timeout") ? 1 : 0;
+            if (sTdLibTimeoutCount > 5) {
+                log.error("TDLib request timeout exceeded, exit application");
+                SpringApplication.exit(applicationContext, () -> -1);
+                System.exit(-1);
+            }
             throw new Exception("Error while fetching chat folder: " + error);
         }
         return response.getObject().orElseThrow();

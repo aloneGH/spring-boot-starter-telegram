@@ -7,13 +7,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.ArrayBlockingQueue;
+
 @Component
 public class UpdateNewMessage implements UpdateNotificationListener<TdApi.UpdateNewMessage> {
     private static final Logger log = LoggerFactory.getLogger(UpdateNewMessage.class);
 
     @Override
     public void handleNotification(TdApi.UpdateNewMessage notification) {
-        MessageCache.newMessagesQueue.add(notification.message);
+        ArrayBlockingQueue<TdApi.Message> queue = MessageCache.newMessagesQueue;
+        if (queue.remainingCapacity() == 0) {
+            queue.poll();
+        }
+        queue.offer(notification.message);
     }
 
     @Override
