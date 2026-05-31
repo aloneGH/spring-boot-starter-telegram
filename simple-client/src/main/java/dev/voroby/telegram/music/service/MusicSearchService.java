@@ -38,7 +38,7 @@ public class MusicSearchService {
 
         query = StringUtils.trimToEmpty(query);
         pn = Math.max(pn - 1, 0);
-        int ps = 10;
+        int ps = 100;
         PageRequest pageRequest = PageRequest.of(pn, ps);
         Page<SrcMusicMessage> data = srcMusicMessageRepository.findByTitleContainsIgnoreCase(query, pageRequest);
 
@@ -68,7 +68,7 @@ public class MusicSearchService {
 
         query = StringUtils.trimToEmpty(query);
         pn = Math.max(pn - 1, 0);
-        int ps = 10;
+        int ps = 100;
         PageRequest pageRequest = PageRequest.of(pn, ps);
         Page<SrcMusicMessage> data = srcMusicMessageRepository.findPerformers(query, pageRequest);
 
