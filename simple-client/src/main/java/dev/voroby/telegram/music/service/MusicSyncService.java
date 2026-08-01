@@ -72,6 +72,9 @@ public class MusicSyncService {
     @Value("${music.sync.MusicSource:Music-Source}")
     private String musicSourceFolderName;
 
+    @Value("${music.sync}")
+    private boolean musicSync;
+
     private final ApplicationContext applicationContext;
 
     public MusicSyncService(TelegramClient telegramClient,
@@ -614,9 +617,12 @@ public class MusicSyncService {
         return fileId;
     }
 
-    // TODO
-//    @Scheduled(fixedDelay = 120_000)
+    @Scheduled(fixedDelay = 120_000)
     public void syncMusic() {
+        if (!musicSync) {
+            return;
+        }
+        
         syncMusicMessages(100);
     }
 
