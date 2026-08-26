@@ -34,13 +34,11 @@ import org.springframework.util.StringUtils;
 import java.io.File;
 import java.nio.file.Files;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * 将指定文件夹中的频道消息（主要是歌曲文件）同步到本地 SQLite。
@@ -958,61 +956,218 @@ public class MusicSyncService {
     @Async
     @EventListener(ApplicationReadyEvent.class)
     public void cleanupDupSrcMusicMessages() {
-        log.info("cleanupDupSrcMusicMessages");
-        List<SrcMusicMessage> allData = srcMusicMessageRepository.findAll();
-        List<SrcMusicMessage> duplicates = new ArrayList<>();
+        if (Constant.LOCAL_DEBUG) {
+            log.warn("cleanupDupSrcMusicMessages: ignored in debug");
+            return;
+        }
 
-        Map<String, SrcMusicMessage> titles = new HashMap<>();
-        Map<String, SrcMusicMessage> performers = new HashMap<>();
+        log.info("cleanupDupSrcMusicMessages: starting");
+        List<SrcMusicMessage> allData = srcMusicMessageRepository.findAll();
+        if (allData.isEmpty()) {
+            log.info("cleanupDupSrcMusicMessages: no records found");
+            return;
+        }
+
+        List<SrcMusicMessage> emptyMetaList = new ArrayList<>();
+        Map<String, List<SrcMusicMessage>> groupedByMusic = new HashMap<>();
 
         for (SrcMusicMessage item : allData) {
             String title = item.getTitle();
             String performer = item.getPerformer();
 
             if (!StringUtils.hasText(title) && !StringUtils.hasText(performer)) {
-                duplicates.add(item);
-                continue;
-            }
-
-            if (titles.containsKey(title) && performers.containsKey(performer)) {
-                SrcMusicMessage exists = titles.get(title);
-                String filenameOld = exists == null ? null : exists.getFileName();
-                if (!StringUtils.hasText(filenameOld) && StringUtils.hasText(item.getFileName())) {
-                    titles.put(title, item);
-                    duplicates.add(exists);
-                } else {
-                    duplicates.add(item);
-                }
-                continue;
-            }
-
-            titles.put(title, item);
-            performers.put(performer, item);
-        }
-
-        log.info("cleanupDupSrcMusicMessages: duplicates = {}", duplicates.size());
-        Map<Long, List<SrcMusicMessage>> duplicatesMap = new HashMap<>();
-        for (SrcMusicMessage item : duplicates) {
-            long chatId = item.getChatId();
-            duplicatesMap.computeIfAbsent(chatId, k -> new ArrayList<>()).add(item);
-        }
-
-        for (Map.Entry<Long, List<SrcMusicMessage>> entry : duplicatesMap.entrySet()) {
-            long chatId = entry.getKey();
-            long[] messageIds = entry.getValue().stream().mapToLong(SrcMusicMessage::getMessageId).toArray();
-            TdApi.DeleteMessages request = new TdApi.DeleteMessages(chatId, messageIds, true);
-            Response<TdApi.Ok> response = telegramClient.send(request);
-            TdApi.Error error = response.getError().orElse(null);
-            if (error != null) {
-                log.error("cleanupDupSrcMusicMessages: failed, chatid = {}, size = {}, error = {}", chatId,
-                        messageIds.length, error);
+                emptyMetaList.add(item);
             } else {
-                log.info("cleanupDupSrcMusicMessages: success, chatId = {}, size = {}", chatId, messageIds.length);
+                String key = getMusicKey(title, performer);
+                groupedByMusic.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
             }
         }
 
-        List<Long> ids = duplicates.stream().map(SrcMusicMessage::getId).toList();
-        srcMusicMessageRepository.deleteAllByIdsCustom(ids);
-        log.info("cleanupDupSrcMusicMessages: all done, ids = {}", ids.size());
+        // 收集所有需要检查 Telegram 存在性的候选消息（包括重复分组中的消息，以及无元数据的消息）
+        List<SrcMusicMessage> candidatesToCheck = new ArrayList<>(emptyMetaList);
+        List<List<SrcMusicMessage>> duplicateGroups = new ArrayList<>();
+        for (List<SrcMusicMessage> group : groupedByMusic.values()) {
+            if (group.size() > 1) {
+                duplicateGroups.add(group);
+                candidatesToCheck.addAll(group);
+            }
+        }
+
+        log.info("cleanupDupSrcMusicMessages: total = {}, duplicateGroups = {}, emptyMeta = {}, candidatesToCheck = {}",
+                allData.size(), duplicateGroups.size(), emptyMetaList.size(), candidatesToCheck.size());
+
+        if (candidatesToCheck.isEmpty()) {
+            log.info("cleanupDupSrcMusicMessages: no duplicate or empty metadata records found");
+            return;
+        }
+
+        // 按 chatId 分组，批量查询 Telegram 判断消息是否存在
+        Map<Long, List<Long>> messageIdsByChat = new HashMap<>();
+        for (SrcMusicMessage item : candidatesToCheck) {
+            if (item.getChatId() != null && item.getMessageId() != null) {
+                messageIdsByChat.computeIfAbsent(item.getChatId(), k -> new ArrayList<>()).add(item.getMessageId());
+            }
+        }
+
+        Map<Long, Set<Long>> chatToExistingMsgIds = new HashMap<>();
+        for (Map.Entry<Long, List<Long>> entry : messageIdsByChat.entrySet()) {
+            long chatId = entry.getKey();
+            List<Long> msgIds = entry.getValue();
+            Set<Long> existingSet = checkExistingMessageIds(chatId, msgIds);
+            chatToExistingMsgIds.put(chatId, existingSet);
+        }
+
+        List<SrcMusicMessage> dbRecordsToDelete = new ArrayList<>();
+
+        // 处理重复歌曲分组：优先保留在 Telegram 上实际存在且信息更完整的消息
+        for (List<SrcMusicMessage> group : duplicateGroups) {
+            List<SrcMusicMessage> existingItems = new ArrayList<>();
+            for (SrcMusicMessage item : group) {
+                Set<Long> existingSet = chatToExistingMsgIds.getOrDefault(item.getChatId(), Collections.emptySet());
+                boolean existsOnTelegram = item.getMessageId() != null && existingSet.contains(item.getMessageId());
+                if (existsOnTelegram) {
+                    existingItems.add(item);
+                } else {
+                    // Telegram 上不存在该消息，说明是无效/已删幽灵记录，从本地数据库清理
+                    dbRecordsToDelete.add(item);
+                }
+            }
+
+            if (existingItems.isEmpty()) {
+                // 如果组内所有记录在 Telegram 上都不存在，全作为幽灵记录清理
+                continue;
+            }
+
+            // 存在 1 条或多条在 Telegram 上的有效消息：选出最优的一条保留在本地数据库，其余从本地数据库清理（不删除 Telegram 消息）
+            SrcMusicMessage bestItem = chooseBestSrcMusicMessage(existingItems);
+            for (SrcMusicMessage item : existingItems) {
+                if (!Objects.equals(item.getId(), bestItem.getId())) {
+                    dbRecordsToDelete.add(item);
+                }
+            }
+        }
+
+        // 处理没有标题和演唱者的消息：仅从本地数据库清理
+        for (SrcMusicMessage item : emptyMetaList) {
+            dbRecordsToDelete.add(item);
+        }
+
+        // 从本地数据库清理重复/无效记录（不向 Telegram 发送删除请求）
+        List<Long> idsToDelete = dbRecordsToDelete.stream().map(SrcMusicMessage::getId).toList();
+        deleteRecordsFromDb(idsToDelete);
+
+        log.info("cleanupDupSrcMusicMessages: completed, dbDeletedCount = {}", idsToDelete.size());
+    }
+
+    private static String getMusicKey(String title, String performer) {
+        String t = title == null ? "" : title.trim().toLowerCase();
+        String p = performer == null ? "" : performer.trim().toLowerCase();
+        return t + ":::" + p;
+    }
+
+    private SrcMusicMessage chooseBestSrcMusicMessage(List<SrcMusicMessage> items) {
+        return items.stream().max((a, b) -> {
+            // 1. 优先有 fileName
+            boolean aHasFile = StringUtils.hasText(a.getFileName());
+            boolean bHasFile = StringUtils.hasText(b.getFileName());
+            if (aHasFile != bHasFile) {
+                return aHasFile ? 1 : -1;
+            }
+            // 2. 优先时长 > 0
+            int aDur = a.getDurationSeconds() != null ? a.getDurationSeconds() : 0;
+            int bDur = b.getDurationSeconds() != null ? b.getDurationSeconds() : 0;
+            if ((aDur > 0) != (bDur > 0)) {
+                return aDur > 0 ? 1 : -1;
+            }
+            // 3. 优先有封面
+            boolean aHasCover = a.getCoverFileId() != null && a.getCoverFileId() != 0;
+            boolean bHasCover = b.getCoverFileId() != null && b.getCoverFileId() != 0;
+            if (aHasCover != bHasCover) {
+                return aHasCover ? 1 : -1;
+            }
+            // 4. 优先更新的 messageId
+            long aMsgId = a.getMessageId() != null ? a.getMessageId() : 0L;
+            long bMsgId = b.getMessageId() != null ? b.getMessageId() : 0L;
+            if (aMsgId != bMsgId) {
+                return Long.compare(aMsgId, bMsgId);
+            }
+            // 5. 兜底按数据库主键
+            long aId = a.getId() != null ? a.getId() : 0L;
+            long bId = b.getId() != null ? b.getId() : 0L;
+            return Long.compare(aId, bId);
+        }).orElse(items.get(0));
+    }
+
+    private Set<Long> checkExistingMessageIds(long chatId, List<Long> messageIds) {
+        Set<Long> existingIds = new HashSet<>();
+        if (messageIds == null || messageIds.isEmpty()) {
+            return existingIds;
+        }
+
+        int batchSize = 100;
+        for (int i = 0; i < messageIds.size(); i += batchSize) {
+            List<Long> batch = messageIds.subList(i, Math.min(i + batchSize, messageIds.size()));
+            long[] batchArray = batch.stream().mapToLong(Long::longValue).toArray();
+
+            try {
+                Response<TdApi.Messages> response = telegramClient.send(new TdApi.GetMessages(chatId, batchArray));
+                TdApi.Error error = response.getError().orElse(null);
+                if (error != null) {
+                    log.warn("checkExistingMessageIds: GetMessages failed for chatId={}, size={}, error={}. Fallback to GetMessage",
+                            chatId, batchArray.length, error);
+                    for (long msgId : batch) {
+                        if (isSingleMessageExists(chatId, msgId)) {
+                            existingIds.add(msgId);
+                        }
+                    }
+                    continue;
+                }
+
+                TdApi.Messages messages = response.getObject().orElse(null);
+                if (messages != null && messages.messages != null) {
+                    for (int j = 0; j < batchArray.length; j++) {
+                        TdApi.Message msg = (j < messages.messages.length) ? messages.messages[j] : null;
+                        if (msg != null && msg.id != 0) {
+                            existingIds.add(batchArray[j]);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.error("checkExistingMessageIds: exception for chatId={}, size={}", chatId, batchArray.length, e);
+                for (long msgId : batch) {
+                    if (isSingleMessageExists(chatId, msgId)) {
+                        existingIds.add(msgId);
+                    }
+                }
+            }
+        }
+
+        return existingIds;
+    }
+
+    private boolean isSingleMessageExists(long chatId, long messageId) {
+        try {
+            Response<TdApi.Message> response = telegramClient.send(new TdApi.GetMessage(chatId, messageId));
+            if (response.getError().isPresent()) {
+                return false;
+            }
+            TdApi.Message msg = response.getObject().orElse(null);
+            return msg != null && msg.id != 0;
+        } catch (Exception e) {
+            log.warn("isSingleMessageExists: error checking msgId={}, chatId={}", messageId, chatId, e);
+            return false;
+        }
+    }
+
+    private void deleteRecordsFromDb(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        int batchSize = 500;
+        for (int i = 0; i < ids.size(); i += batchSize) {
+            List<Long> batch = ids.subList(i, Math.min(i + batchSize, ids.size()));
+            srcMusicMessageRepository.deleteAllByIdsCustom(batch);
+        }
+        log.info("deleteRecordsFromDb: deleted {} records from DB", ids.size());
     }
 }
