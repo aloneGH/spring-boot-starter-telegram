@@ -69,8 +69,16 @@ public class ApiSignatureFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 2. 基础校验 (空值、时间戳有效期)
-        if (StringUtils.isAnyBlank(apiKey, signature, timestamp, nonce) || isTimestampInvalid(timestamp)) {
+        // 2. 基础校验 (空值校验)
+        if (StringUtils.isAnyBlank(apiKey, signature, timestamp, nonce)) {
+            renderError(response, "Invalid Request Headers");
+            return;
+        }
+
+        // 针对媒体流 (/music/stream)：播放器暂停后继续播放或播放长音频（Range 分片请求）时无法动态刷新 Header，
+        // 只能复用起播时的静态 Header。因此跳过时间差校验，普通 API 依然强制校验 5 分钟时间戳
+        boolean isMediaStream = requestWrapper.getServletPath().startsWith("/music/stream");
+        if (!isMediaStream && isTimestampInvalid(timestamp)) {
             renderError(response, "Invalid Request Headers");
             return;
         }
