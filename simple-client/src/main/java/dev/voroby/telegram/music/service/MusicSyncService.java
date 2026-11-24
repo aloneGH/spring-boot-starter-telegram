@@ -103,6 +103,10 @@ public class MusicSyncService {
                 0
         );
         telegramClient.sendWithCallback(optimizeRequest, (obj, error) -> {
+            if (error != null || obj == null) {
+                log.warn("OptimizeStorage failed: {}", error);
+                return;
+            }
             // 打印当前总字节数
             System.out.println("当前 TDLib 占用空间: " + obj.size / (1024 * 1024) + " MB");
         });
