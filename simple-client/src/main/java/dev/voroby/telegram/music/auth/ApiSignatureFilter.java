@@ -55,6 +55,29 @@ public class ApiSignatureFilter extends OncePerRequestFilter {
 
         // 包装 Request 以便多次读取 Body
         ContentCachingRequestWrapper requestWrapper = new ContentCachingRequestWrapper(request, 0);
+        String servletPath = requestWrapper.getServletPath();
+
+        // 0. 封面图 (/music/cover/*) 支持固定 Query 签名 (?k=apiKey&s=HMAC_SHA256(secret, apiKey + ":" + path))
+        //    解决客户端图片组件无法附带自定义 Header 的问题，同时保证 URL 稳定可命中长期缓存
+        if (servletPath.startsWith("/music/cover")) {
+            String queryKey = requestWrapper.getParameter("k");
+            String querySig = requestWrapper.getParameter("s");
+            if (StringUtils.isNoneBlank(queryKey, querySig)) {
+                String querySecret = validApiKeys.get(queryKey);
+                if (StringUtils.isBlank(querySecret)) {
+                    renderError(response, "Invalid API Key");
+                    return;
+                }
+                String expectedSig = new HmacUtils(HmacAlgorithms.HMAC_SHA_256, querySecret)
+                        .hmacHex(queryKey + ":" + servletPath);
+                if (expectedSig.equalsIgnoreCase(querySig)) {
+                    filterChain.doFilter(requestWrapper, response);
+                    return;
+                }
+                renderError(response, "Signature Verification Failed");
+                return;
+            }
+        }
 
         // 1. 获取 Header 中的签名参数
         String apiKey = requestWrapper.getHeader("X-API-KEY");
@@ -75,10 +98,10 @@ public class ApiSignatureFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 针对媒体流 (/music/stream)：播放器暂停后继续播放或播放长音频（Range 分片请求）时无法动态刷新 Header，
-        // 只能复用起播时的静态 Header。因此跳过时间差校验，普通 API 依然强制校验 5 分钟时间戳
-        boolean isMediaStream = requestWrapper.getServletPath().startsWith("/music/stream");
-        if (!isMediaStream && isTimestampInvalid(timestamp)) {
+        // 针对媒体流 (/music/stream) 与封面 (/music/cover)：播放器暂停后继续播放或分片加载时无法动态刷新 Header，
+        // 只能复用静态 Header。因此跳过时间差校验，普通 API 依然强制校验 5 分钟时间戳
+        boolean isMediaResource = servletPath.startsWith("/music/stream") || servletPath.startsWith("/music/cover");
+        if (!isMediaResource && isTimestampInvalid(timestamp)) {
             renderError(response, "Invalid Request Headers");
             return;
         }

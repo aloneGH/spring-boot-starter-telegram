@@ -5,12 +5,12 @@ public class LyricResponse {
     private Boolean sfy;
     private Boolean qfy;
     private Lrc lrc;
+    private Lrc tlyric;
     private Integer code;
 
     public LyricResponse() {
     }
 
-    // Getter 和 Setter
     public Boolean getSgc() {
         return sgc;
     }
@@ -43,6 +43,14 @@ public class LyricResponse {
         this.lrc = lrc;
     }
 
+    public Lrc getTlyric() {
+        return tlyric;
+    }
+
+    public void setTlyric(Lrc tlyric) {
+        this.tlyric = tlyric;
+    }
+
     public Integer getCode() {
         return code;
     }
@@ -51,7 +59,6 @@ public class LyricResponse {
         this.code = code;
     }
 
-    // 内部类表示 lrc 节点
     public static class Lrc {
         private Integer version;
         private String lyric;
@@ -76,4 +83,3 @@ public class LyricResponse {
         }
     }
 }
-

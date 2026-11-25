@@ -1,35 +1,33 @@
 package dev.voroby.telegram.music.listeners;
 
 import dev.voroby.springframework.telegram.client.updates.UpdateNotificationListener;
-import dev.voroby.telegram.music.service.MusicSyncService;
+import dev.voroby.telegram.music.tdlib.TdGatewayService;
 import org.drinkless.tdlib.TdApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
-
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 @Component
 public class UpdateFileListener implements UpdateNotificationListener<TdApi.UpdateFile> {
     private static final Logger log = LoggerFactory.getLogger(UpdateFileListener.class);
 
+    private final TdGatewayService tdGatewayService;
+
+    public UpdateFileListener(@Lazy TdGatewayService tdGatewayService) {
+        this.tdGatewayService = tdGatewayService;
+    }
+
     @Override
     public void handleNotification(TdApi.UpdateFile notification) {
+        if (notification == null || notification.file == null) {
+            return;
+        }
         TdApi.File file = notification.file;
-        if (file == null || !file.local.isDownloadingCompleted || file.remote.isUploadingActive
-                || !file.remote.isUploadingCompleted) {
-            return;
+        if (file.local != null && file.local.isDownloadingCompleted) {
+            log.debug("File download completed: id={}, path={}, size={}", file.id, file.local.path, file.expectedSize);
+            tdGatewayService.onFileUpdated(file);
         }
-
-        log.info("handleNotification: {}, size = {}", file.local.path, file.expectedSize);
-        final CompletableFuture<TdApi.File> future = MusicSyncService.downloadFutures.get(file.id);
-        if (future == null) {
-            return;
-        }
-
-        MusicSyncService.downloadFutures.remove(file.id);
-        CompletableFuture.delayedExecutor(2, TimeUnit.SECONDS).execute(() -> future.complete(file));
     }
 
     @Override

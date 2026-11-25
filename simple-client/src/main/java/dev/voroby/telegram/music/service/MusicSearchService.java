@@ -3,84 +3,61 @@ package dev.voroby.telegram.music.service;
 import dev.voroby.telegram.music.dto.ArtistItem;
 import dev.voroby.telegram.music.dto.MediaResponse;
 import dev.voroby.telegram.music.dto.MusicItem;
-import dev.voroby.telegram.music.model.SrcMusicMessage;
-import dev.voroby.telegram.music.repository.SrcMusicMessageRepository;
-import org.apache.commons.io.FilenameUtils;
+import dev.voroby.telegram.music.model.Track;
+import dev.voroby.telegram.music.repository.MusicCatalogRepository;
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 基于 SQLite FTS5 的简繁统一、多词混合检索（覆盖歌名、歌手、专辑、文件名）。
+ */
 @RestController("MusicSearch")
 @RequestMapping("/search")
 public class MusicSearchService {
-    private static final Logger log = LoggerFactory.getLogger(MusicSearchService.class);
-    private final SrcMusicMessageRepository srcMusicMessageRepository;
+    private static final int PAGE_SIZE = 100;
 
-    public MusicSearchService(SrcMusicMessageRepository srcMusicMessageRepository) {
-        this.srcMusicMessageRepository = srcMusicMessageRepository;
+    private final MusicCatalogRepository catalogRepository;
+
+    public MusicSearchService(MusicCatalogRepository catalogRepository) {
+        this.catalogRepository = catalogRepository;
     }
 
     @GetMapping("/music")
-    public MediaResponse<MusicItem> searchLyrics(@RequestParam(name = "q") String query,
-                                                 @RequestParam(name = "pn", defaultValue = "1") int pn) {
-        MediaResponse<MusicItem> response = new MediaResponse<>();
+    public MediaResponse<MusicItem> searchMusic(@RequestParam(name = "q") String query,
+                                                @RequestParam(name = "pn", defaultValue = "1") int pn) {
         if (StringUtils.isBlank(query)) {
-            return response;
+            return new MediaResponse<>(false, List.of());
         }
-
-        query = StringUtils.trimToEmpty(query);
-        pn = Math.max(pn - 1, 0);
-        int ps = 100;
-        PageRequest pageRequest = PageRequest.of(pn, ps);
-        Page<SrcMusicMessage> data = srcMusicMessageRepository.findByTitleContainsIgnoreCase(query, pageRequest);
-
-        boolean hasMore = data.hasNext();
-        List<MusicItem> items = data.stream()
-                .filter(it -> it.getChatId() != -1 && it.getMessageId() != -1
-                        && StringUtils.isNotBlank(it.getTitle()))
-                .map(it -> {
-                    String title = StringUtils.isNotBlank(it.getTitle()) ? it.getTitle()
-                            : FilenameUtils.getBaseName(it.getFileName()).trim();
-                    return new MusicItem(it.getChatId(), it.getMessageId(), it.getFileName(), it.getMimeType(),
-                            title, it.getPerformer(), it.getDurationSeconds(), it.getAudioFileSize());
-                }).toList();
-
-        response.setHasMore(hasMore);
-        response.setData(items);
-        return response;
+        int pageZero = Math.max(pn - 1, 0);
+        MusicCatalogRepository.PageResult<Track> page =
+                catalogRepository.searchReadyTracks(query.trim(), pageZero, PAGE_SIZE);
+        List<MusicItem> items = page.items().stream()
+                .map(t -> MusicStreamService.toMusicItem(t.getStoredChatId() != null ? t.getStoredChatId() : 0L, t))
+                .toList();
+        return new MediaResponse<>(page.hasMore(), items);
     }
 
     @GetMapping("/artist")
     public MediaResponse<ArtistItem> searchArtist(@RequestParam(name = "q") String query,
                                                   @RequestParam(name = "pn", defaultValue = "1") int pn) {
-        MediaResponse<ArtistItem> response = new MediaResponse<>();
         if (StringUtils.isBlank(query)) {
-            return response;
+            return new MediaResponse<>(false, List.of());
         }
-
-        query = StringUtils.trimToEmpty(query);
-        pn = Math.max(pn - 1, 0);
-        int ps = 100;
-        PageRequest pageRequest = PageRequest.of(pn, ps);
-        Page<SrcMusicMessage> data = srcMusicMessageRepository.findPerformers(query, pageRequest);
-
-        boolean hasMore = data.hasNext();
-        List<ArtistItem> artists = data.stream()
-                .filter(it -> it.getChatId() != -1 && it.getMessageId() != -1
-                        && StringUtils.isNotBlank(it.getTitle()))
-                .map(it -> new ArtistItem(it.getId(), it.getPerformer()))
-                .toList();
-
-        response.setHasMore(hasMore);
-        response.setData(artists);
-        return response;
+        int pageZero = Math.max(pn - 1, 0);
+        MusicCatalogRepository.PageResult<String> page =
+                catalogRepository.searchArtists(query.trim(), pageZero, PAGE_SIZE);
+        List<ArtistItem> artists = new ArrayList<>(page.items().size());
+        long baseIdx = (long) pageZero * PAGE_SIZE + 1;
+        for (int i = 0; i < page.items().size(); i++) {
+            String name = page.items().get(i);
+            artists.add(new ArtistItem(baseIdx + i, name));
+        }
+        return new MediaResponse<>(page.hasMore(), artists);
     }
 }

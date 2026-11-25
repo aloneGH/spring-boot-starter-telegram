@@ -11,11 +11,13 @@ import java.util.Arrays;
 public class UpdateChatFolder implements UpdateNotificationListener<TdApi.UpdateChatFolders> {
     @Override
     public void handleNotification(TdApi.UpdateChatFolders notification) {
-        ChatFolderCache.chatFolders.clear();
-        if (notification == null || notification.chatFolders == null) {
-            return;
+        synchronized (ChatFolderCache.chatFolders) {
+            ChatFolderCache.chatFolders.clear();
+            if (notification != null && notification.chatFolders != null) {
+                ChatFolderCache.chatFolders.addAll(Arrays.asList(notification.chatFolders));
+            }
         }
-        ChatFolderCache.chatFolders.addAll(Arrays.asList(notification.chatFolders));
+        ChatFolderCache.invalidateAll();
     }
 
     @Override

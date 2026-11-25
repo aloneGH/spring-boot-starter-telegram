@@ -6,5 +6,5 @@ import java.util.concurrent.ArrayBlockingQueue;
 
 public final class MessageCache {
 
-    public static final ArrayBlockingQueue<TdApi.Message> newMessagesQueue = new ArrayBlockingQueue<>(512);
+    public static final ArrayBlockingQueue<TdApi.Message> newMessagesQueue = new ArrayBlockingQueue<>(4096);
 }
